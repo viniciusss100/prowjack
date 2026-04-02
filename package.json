@@ -1,0 +1,18 @@
+{
+  "name": "prowjack-pro",
+  "version": "3.0.0",
+  "description": "ProwJack PRO — Jackett Stremio Addon",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js",
+    "dev":   "nodemon addon.js"
+  },
+  "dependencies": {
+    "axios":   "^1.7.0",
+    "express": "^4.19.0",
+    "ioredis": "^5.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
