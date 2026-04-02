@@ -61,7 +61,7 @@ function decodeUserCfg(str) {
 // Config base quando não há nada codificado na URL
 function defaultPrefs() {
   return {
-    indexers:        ENV.indexers,        // vindos da env
+    indexers:        ENV.indexers,
     categories:      ["movie", "series"],
     weights:         { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5 },
     maxResults:      20,
@@ -70,10 +70,6 @@ function defaultPrefs() {
   };
 }
 
-// Sempre usa credenciais da env; sobrepõe com prefs da URL.
-// Regra de indexers:
-//   ENV.indexers=['all']        → usa o que o usuário configurou na UI
-//   ENV.indexers=['capybarabr'] → NUNCA deixa 'all' da UI sobrescrever; filtra subconjunto
 function resolvePrefs(encoded) {
   const userPrefs = encoded ? (decodeUserCfg(encoded) || {}) : {};
   const merged = { ...defaultPrefs(), ...userPrefs };
@@ -82,15 +78,12 @@ function resolvePrefs(encoded) {
   const userIsAll = !merged.indexers?.length || merged.indexers.includes("all");
 
   if (!envIsAll && userIsAll) {
-    // Env tem indexers específicos, UI escolheu 'all' → usa env
     merged.indexers = ENV.indexers;
   } else if (!envIsAll && !userIsAll) {
-    // Ambos específicos → intersecção (só usa o que está na env)
     const envSet = new Set(ENV.indexers);
     merged.indexers = merged.indexers.filter(ix => envSet.has(ix));
     if (!merged.indexers.length) merged.indexers = ENV.indexers;
   }
-  // envIsAll → usa o que vier da UI (comportamento original)
 
   return merged;
 }
@@ -173,18 +166,15 @@ function base32ToHex(b32) {
 
 function extractInfoHash(magnet) {
   if (!magnet) return null;
-  // Hex hash (40 chars) — formato mais comum
   const hex = magnet.match(/btih:([a-fA-F0-9]{40})(?:[&?]|$)/i);
   if (hex) return hex[1].toLowerCase();
-  // Base32 hash (32 chars A-Z2-7) — alguns indexers API
   const b32 = magnet.match(/btih:([A-Za-z2-7]{32})(?:[&?]|$)/i);
   if (b32) return base32ToHex(b32[1]);
-  // Hex sem delimitador exato
   const loose = magnet.match(/btih:([a-fA-F0-9]{40})/i);
   if (loose) return loose[1].toLowerCase();
   return null;
 }
-// Extrai o info dict de um buffer .torrent (bencode mínimo)
+
 function extractInfoBuf(buf) {
   const s   = buf.toString("latin1");
   const pos = s.indexOf("4:info");
@@ -206,18 +196,14 @@ function extractInfoBuf(buf) {
   return depth === 0 ? buf.slice(start, i) : null;
 }
 
-// Resolve infoHash por todas as fontes possíveis (com fallback para fetch do torrent)
 async function resolveInfoHash(r) {
-  // 1. InfoHash direto do Jackett
   if (r.InfoHash) return r.InfoHash.toLowerCase();
 
-  // 2. Extrair do MagnetUri
   if (r.MagnetUri) {
     const h = extractInfoHash(r.MagnetUri);
     if (h) return h;
   }
 
-  // 3. Seguir o Link do Jackett server-side
   if (!r.Link) return null;
 
   try {
@@ -229,17 +215,14 @@ async function resolveInfoHash(r) {
       validateStatus:     s => s < 400,
     });
 
-    // 3a. URL final é magnet?
     const finalUrl = res.request?.res?.responseUrl || "";
     if (finalUrl.startsWith("magnet:")) return extractInfoHash(finalUrl);
 
     const buf = Buffer.from(res.data);
     const bodyStr = buf.toString("utf8", 0, Math.min(buf.length, 200));
 
-    // 3b. Corpo é magnet em texto?
     if (bodyStr.trimStart().startsWith("magnet:")) return extractInfoHash(bodyStr.trim());
 
-    // 3c. É um .torrent? (bencode começa com 'd')
     if (buf[0] === 0x64) {
       const infoBuf = extractInfoBuf(buf);
       if (infoBuf) return crypto.createHash("sha1").update(infoBuf).digest("hex");
@@ -305,7 +288,6 @@ function formatStream(r, indexerName) {
   const size   = fmtBytes(r.Size);
   const seeds  = r.Seeders || 0;
 
-  // ── NAME  (3 linhas no card do Stremio)
   const nameLine1 = `🔍 ProwJack · ${indexerName}`;
   const nameLine2 = [
     res  ? res.emoji          : "❔",
@@ -318,7 +300,6 @@ function formatStream(r, indexerName) {
     seeds > 0 ? `🌱 ${seeds}` : "",
   ].filter(Boolean).join("  ");
 
-  // ── DESCRIPTION  (expandido no Stremio)
   const clean = t
     .replace(/\b\d{4}\b\.?/g, " ")
     .replace(/\./g, " ")
@@ -359,14 +340,11 @@ function formatStream(r, indexerName) {
 // JACKETT  (credenciais sempre da ENV)
 // ─────────────────────────────────────────────────────────
 async function jackettFetchIndexers() {
-  // Estratégia 1: /api/v2.0/indexers (versões recentes do Jackett)
   const strategies = [
     () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
             { params: { apikey: ENV.apiKey }, timeout: 8000 }),
-    // Estratégia 2: com configured=true (algumas versões)
     () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
             { params: { apikey: ENV.apiKey, configured: "true" }, timeout: 8000 }),
-    // Estratégia 3: header X-Api-Key (Jackett v0.21+)
     () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
             { headers: { "X-Api-Key": ENV.apiKey }, timeout: 8000 }),
   ];
@@ -379,7 +357,6 @@ async function jackettFetchIndexers() {
     } catch {}
   }
 
-  // Fallback: se nenhuma estratégia funcionar, retorna os indexers da ENV como lista sintética
   console.warn("⚠️  Não foi possível listar indexers do Jackett — usando lista da ENV");
   return ENV.indexers.map(id => ({ id, name: id, configured: true }));
 }
@@ -401,7 +378,6 @@ async function trackMetrics(indexer, ms, count, ok) {
 }
 
 async function jackettSearch(query, prefs) {
-  // Indexers sempre da ENV — seleção pela UI desativada temporariamente
   const indexers  = (ENV.indexers.length === 1 && ENV.indexers[0] === "all")
     ? ["all"]
     : ENV.indexers;
@@ -439,7 +415,6 @@ async function jackettSearch(query, prefs) {
 
   const all = (await Promise.all(requests)).flat();
   console.log(`📦 Total: ${all.length}`);
-  // Só cacheia se tiver resultados — evita travar buscas válidas
   if (all.length > 0) {
     await rc.set(cacheKey, JSON.stringify(all), 600);
   }
@@ -447,24 +422,56 @@ async function jackettSearch(query, prefs) {
 }
 
 // ─────────────────────────────────────────────────────────
-// CINEMETA
+// METADATA  (Cinemeta para filmes/séries, Kitsu para anime)
 // ─────────────────────────────────────────────────────────
-async function getTitle(type, imdbId) {
+
+// Busca título no Kitsu pelo ID numérico
+async function getKitsuTitle(kitsuId) {
+  try {
+    const res = await axios.get(
+      `https://kitsu.io/api/edge/anime/${kitsuId}`,
+      { timeout: 5000, headers: { Accept: "application/vnd.api+json" } }
+    );
+    const attrs = res.data?.data?.attributes;
+    // Preferência: título em inglês → título canônico → slug
+    return attrs?.titles?.en
+        || attrs?.titles?.en_jp
+        || attrs?.canonicalTitle
+        || attrs?.slug
+        || kitsuId;
+  } catch (e) {
+    console.log(`  ⚠️  getKitsuTitle(${kitsuId}): ${e.message}`);
+    return kitsuId;
+  }
+}
+
+// Retorna { title, isAnime }
+async function getTitle(type, rawId) {
+  // ID do Kitsu: "kitsu:12345"
+  if (rawId.startsWith("kitsu:")) {
+    const kitsuId = rawId.replace("kitsu:", "");
+    const title   = await getKitsuTitle(kitsuId);
+    return { title, isAnime: true };
+  }
+
+  // ID IMDB padrão
   try {
     const res  = await axios.get(
-      `https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`,
+      `https://v3-cinemeta.strem.io/meta/${type}/${rawId}.json`,
       { timeout: 5000 }
     );
     const meta = res.data?.meta;
-    return meta?.name || meta?.originalName || imdbId;
-  } catch { return imdbId; }
+    const title = meta?.name || meta?.originalName || rawId;
+    return { title, isAnime: false };
+  } catch {
+    return { title: rawId, isAnime: false };
+  }
 }
 
 // ─────────────────────────────────────────────────────────
-// ROTAS DE API   (antes das rotas parametricas /:config/)
+// ROTAS DE API
 // ─────────────────────────────────────────────────────────
 
-// Status da conexão env
 app.get("/api/env", (_, res) => {
   res.json({
     jackettUrl: ENV.jackettUrl,
@@ -473,11 +480,9 @@ app.get("/api/env", (_, res) => {
   });
 });
 
-// Testa conexão com o Jackett usando credenciais da env
 app.get("/api/test", async (_, res) => {
   try {
     const indexers = await jackettFetchIndexers();
-    const fromEnv  = indexers.every(ix => ENV.indexers.includes(ix.id || ix.name));
     res.json({
       ok: true,
       count: indexers.length,
@@ -494,7 +499,6 @@ app.get("/api/test", async (_, res) => {
   }
 });
 
-// Métricas
 app.get("/api/metrics", async (_, res) => {
   const keys = await rc.keys("metrics:*");
   const out  = {};
@@ -512,21 +516,20 @@ app.delete("/api/metrics/:indexer", async (req, res) => {
 
 // ─────────────────────────────────────────────────────────
 // MANIFEST BASE  (sem config — mostra botão "Configurar")
-// O Stremio abre /configure quando configurationRequired=true
 // ─────────────────────────────────────────────────────────
 app.get("/manifest.json", (_, res) => {
   res.json({
     id:          "org.prowjack.pro",
-    version:     "3.0.0",
+    version:     "3.1.0",
     name:        "ProwJack PRO",
     description: "Busca no Jackett com ranking inteligente e prioridade PT-BR. Configure os indexers e pesos antes de instalar.",
     resources:   ["stream"],
     types:       ["movie", "series"],
-    idPrefixes:  ["tt"],
+    idPrefixes:  ["tt", "kitsu:"],
     catalogs:    [],
     behaviorHints: {
       configurable:          true,
-      configurationRequired: true,  // redireciona para /configure
+      configurationRequired: true,
       p2p:                   true,
     },
   });
@@ -534,25 +537,24 @@ app.get("/manifest.json", (_, res) => {
 
 // ─────────────────────────────────────────────────────────
 // PÁGINA DE CONFIGURAÇÃO
-// O Stremio abre essa URL no browser quando clica Configurar
 // ─────────────────────────────────────────────────────────
 app.get("/configure", (_, res) =>
   res.sendFile(path.join(__dirname, "public", "configure.html"))
 );
 
-// Redireciona raiz para /configure
 app.get("/", (_, res) => res.redirect("/configure"));
 
 // ─────────────────────────────────────────────────────────
-// MANIFEST COM CONFIG   (URL personalizada gerada pela UI)
-// Ex: /eyJpbmRleGVycy...base64.../manifest.json
+// MANIFEST COM CONFIG
 // ─────────────────────────────────────────────────────────
 app.get("/:userConfig/manifest.json", (req, res) => {
   const prefs = resolvePrefs(req.params.userConfig);
 
+  // Normaliza categorias: anime → series (Stremio não tem tipo "anime")
   const types = [...new Set(
     (prefs.categories || ["movie", "series"]).map(c =>
-      c === "movies" ? "movie" : c === "anime" ? "series" : c
+      c === "movies" ? "movie" :
+      c === "anime"  ? "series" : c
     )
   )];
 
@@ -562,16 +564,17 @@ app.get("/:userConfig/manifest.json", (req, res) => {
 
   res.json({
     id:          "org.prowjack.pro",
-    version:     "3.0.0",
+    version:     "3.1.0",
     name:        "ProwJack PRO",
     description: `Jackett (${indexerLabel}) · Ranking PT-BR · Redis cache`,
     resources:   ["stream"],
     types,
-    idPrefixes:  ["tt"],
+    // kitsu: prefix necessário para o Stremio rotear animes do Kitsu para este addon
+    idPrefixes:  ["tt", "kitsu:"],
     catalogs:    [],
     behaviorHints: {
       configurable:          true,
-      configurationRequired: false,  // já configurado
+      configurationRequired: false,
       p2p:                   true,
     },
   });
@@ -587,16 +590,23 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
 
   try {
-    const imdbId = id.split(":")[0];
-    let title    = await getTitle(type, imdbId);
-    let query    = title;
+    const imdbId            = id.split(":")[0];
+    const { title, isAnime } = await getTitle(type, imdbId);
+    let query               = title;
 
     if (type === "series" && id.includes(":")) {
       const [, s, e] = id.split(":");
-      query += ` S${String(s).padStart(2,"0")}E${String(e).padStart(2,"0")}`;
+      if (isAnime) {
+        // Anime: usa só o número do episódio absoluto (melhor resultado no Jackett/Nyaa)
+        const epNum = parseInt(e, 10);
+        query += ` ${epNum}`;
+      } else {
+        // Série normal: formato SxxExx
+        query += ` S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`;
+      }
     }
 
-    console.log(`🎬 ${type} ${id} → "${query}"`);
+    console.log(`🎬 ${type} ${id} [${isAnime ? "anime/kitsu" : "imdb"}] → "${query}"`);
 
     const results = await jackettSearch(query, prefs);
 
@@ -605,7 +615,6 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       console.log(`🔍 Sample: InfoHash=${s.InfoHash||"null"} MagnetUri=${s.MagnetUri?"ok":"null"} Link=${s.Link?"ok":"null"}`);
     }
 
-    // Filtra e ordena — depois resolve infoHash de forma async (inclui fetch de .torrent)
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
       .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))

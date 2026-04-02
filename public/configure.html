@@ -70,19 +70,6 @@ input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--amber);border-radius:50%;cursor:pointer;transition:.15s}
 input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px var(--amber)}
 
-/* INDEXERS */
-.ix-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-.ix-search{flex:1;min-width:140px;max-width:220px;margin:0!important;padding:7px 10px!important}
-.ix-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:7px;max-height:340px;overflow-y:auto}
-.ix-grid::-webkit-scrollbar{width:3px}
-.ix-grid::-webkit-scrollbar-thumb{background:var(--bord2);border-radius:2px}
-.ix-item{display:flex;align-items:center;gap:8px;background:#080910;border:1px solid var(--bord);border-radius:3px;padding:7px 10px;cursor:pointer;transition:.15s;user-select:none}
-.ix-item:hover{border-color:var(--bord2)}
-.ix-item.on{border-color:var(--adim);background:rgba(245,166,35,.06)}
-.ix-item input[type=checkbox]{accent-color:var(--amber);cursor:pointer;flex-shrink:0}
-.ix-item span{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ix-empty{padding:40px;text-align:center;color:var(--dim);font-size:12px}
-
 /* TOGGLES */
 .tg-group{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
 .tg{padding:6px 14px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--bord2);background:transparent;color:var(--dim);border-radius:2px;cursor:pointer;transition:.15s}
@@ -105,6 +92,9 @@ input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px
 .ibox-url{padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.9}
 .ibox-url.empty{color:var(--dim);font-style:italic}
 .ibox-foot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--bord)}
+
+/* ANIME INFO */
+.anime-info{background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:3px;padding:10px 14px;margin-top:10px;font-size:11px;color:var(--amber);line-height:1.8}
 
 /* METRICS */
 .metrics-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
@@ -137,7 +127,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
   <div>
     <div class="logo-wrap">
       <span class="logo-name">ProwJack</span>
-      <span class="logo-v">PRO v3.0</span>
+      <span class="logo-v">PRO v3.1</span>
     </div>
     <div class="logo-sub">Stremio · Jackett · Smart Ranking</div>
   </div>
@@ -179,7 +169,12 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
       <button class="tg on" data-cat="series">📺 Séries</button>
       <button class="tg" data-cat="anime">🌸 Anime</button>
     </div>
-    <label>Máximo de resultados</label>
+    <div class="anime-info" id="anime-hint" style="display:none">
+      🌸 <strong>Anime ativo:</strong> IDs do Kitsu serão roteados automaticamente.<br>
+      O addon buscará pelo título em inglês no Jackett. Para melhores resultados,
+      configure um indexer de anime no Jackett (ex: <strong>Nyaa.si</strong>).
+    </div>
+    <label style="margin-top:14px">Máximo de resultados</label>
     <div class="w-row">
       <div class="w-label">Resultados</div>
       <input type="range" id="maxResults" min="5" max="50" step="5" value="20" oninput="sv(this,'maxResults-v')"/>
@@ -196,7 +191,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
     </div>
   </div>
 
-  <!-- Indexers — seleção via UI desativada temporariamente -->
+  <!-- Indexers — info da env -->
   <div class="card full" style="border-color:var(--adim)">
     <div class="ctitle">Indexers</div>
     <div class="env-box" id="ix-active-box">
@@ -210,8 +205,13 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
       </div>
     </div>
     <p class="info">
-      Os indexers são definidos exclusivamente pela variável <code style="color:var(--amber);background:#060709;padding:1px 6px;border-radius:2px">INDEXERS</code> no Docker Compose.
-      A seleção pela interface está temporariamente desativada.
+      Os indexers são definidos exclusivamente pela variável
+      <code style="color:var(--amber);background:#060709;padding:1px 6px;border-radius:2px">INDEXERS</code>
+      no Docker Compose. A seleção pela interface está temporariamente desativada.
+      <br><br>
+      💡 Para buscar <strong>animes</strong>, adicione <strong>nyaa</strong> (ou outro indexer de anime) na variável
+      <code style="color:var(--amber);background:#060709;padding:1px 6px;border-radius:2px">INDEXERS</code>
+      e configure-o no Jackett.
     </p>
   </div>
 
@@ -294,7 +294,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 <script>
 // ── STATE ─────────────────────────────────────
 const state = {
-  allIndexers:      [],   // { id, name } vindos do Jackett
+  allIndexers:      [],
   selectedIndexers: [],
   useAll:           true,
 };
@@ -308,7 +308,7 @@ function toast(msg, err=false) {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.className = '', 3200);
 }
-function dot(id, state) {   // 'ok' | 'err' | 'wait' | ''
+function dot(id, state) {
   document.getElementById('d-' + id).className = 'dot ' + state;
 }
 function label(id, txt) { document.getElementById('l-' + id).textContent = txt; }
@@ -322,9 +322,14 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 }));
 
 // ── CATEGORIES ───────────────────────────────
-document.querySelectorAll('.tg[data-cat]').forEach(t =>
-  t.addEventListener('click', () => t.classList.toggle('on'))
-);
+document.querySelectorAll('.tg[data-cat]').forEach(t => {
+  t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    // Mostra dica de anime quando anime estiver ativo
+    const animeOn = document.querySelector('.tg[data-cat="anime"]').classList.contains('on');
+    document.getElementById('anime-hint').style.display = animeOn ? 'block' : 'none';
+  });
+});
 function getCats() {
   return [...document.querySelectorAll('.tg[data-cat].on')].map(t => t.dataset.cat);
 }
@@ -361,10 +366,12 @@ async function testConnection() {
     if (data.ok) {
       const note = data.note
         ? `<br><span style="color:var(--amber)">⚠️ ${data.note}</span>` : '';
-      logEl.innerHTML = `<span style="color:var(--green)">✅ ${data.count} indexers encontrados</span>${note}`;
+      const indexerList = data.indexers.length
+        ? `<br><span style="color:var(--dim)">Indexers: ${data.indexers.map(i => i.name||i.id).join(', ')}</span>`
+        : '';
+      logEl.innerHTML = `<span style="color:var(--green)">✅ ${data.count} indexers encontrados</span>${note}${indexerList}`;
       dot('jackett', 'ok');
       label('jackett', `Jackett ✓ (${data.count})`);
-      renderIndexers(data.indexers);
       toast(`${data.count} indexers carregados!`);
     } else {
       logEl.innerHTML = `<span style="color:var(--red)">❌ ${data.error}</span>
@@ -382,74 +389,13 @@ async function testConnection() {
 // ── REDIS CHECK ───────────────────────────────
 async function checkRedis() {
   try {
-    const metrics = await fetch('/api/metrics').then(r => r.json());
+    await fetch('/api/metrics').then(r => r.json());
     dot('redis', 'ok');
     label('redis', 'Redis ✓');
   } catch {
     dot('redis', 'err');
     label('redis', 'Redis ✗');
   }
-}
-
-// ── INDEXERS ─────────────────────────────────
-function renderIndexers(list) {
-  state.allIndexers = list;
-  const grid = document.getElementById('ix-grid');
-
-  if (!list.length) {
-    grid.innerHTML = '<div class="ix-empty">Nenhum indexer configurado no Jackett</div>';
-    return;
-  }
-
-  grid.innerHTML = '';
-  list.forEach(ix => {
-    const id   = ix.id || ix.ID || ix.name;
-    const name = ix.name || id;
-    const sel  = state.useAll || state.selectedIndexers.includes(id);
-
-    const div = document.createElement('div');
-    div.className = 'ix-item' + (sel ? ' on' : '');
-    div.dataset.id = id;
-    div.innerHTML  = `<input type="checkbox" id="cb-${id}" ${sel?'checked':''}/>
-                      <span title="${name}">${name}</span>`;
-    div.querySelector('input').addEventListener('change', e => {
-      div.classList.toggle('on', e.target.checked);
-      syncSelected();
-    });
-    grid.appendChild(div);
-  });
-}
-
-function syncSelected() {
-  state.selectedIndexers =
-    [...document.querySelectorAll('#ix-grid .ix-item.on')].map(el => el.dataset.id);
-}
-
-function toggleAll() {
-  state.useAll = !document.getElementById('allBtn').classList.toggle('on');
-  state.useAll = document.getElementById('allBtn').classList.contains('on');
-  // Quando useAll=true, marca todos; quando false, deixa como está
-  if (state.useAll) selAll();
-}
-
-function selAll() {
-  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
-    el.classList.add('on');
-    el.querySelector('input').checked = true;
-  });
-  syncSelected();
-}
-function selNone() {
-  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
-    el.classList.remove('on');
-    el.querySelector('input').checked = false;
-  });
-  syncSelected();
-}
-function filterIx(q) {
-  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
-    el.style.display = el.querySelector('span').textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
-  });
 }
 
 // ── WEIGHTS ───────────────────────────────────
@@ -503,9 +449,7 @@ function preview() {
 
 // ── GENERATE URL ─────────────────────────────
 function buildPrefs() {
-  const indexers = state.useAll
-    ? ['all']
-    : state.selectedIndexers.length ? state.selectedIndexers : ['all'];
+  const indexers = ['all']; // sempre usa a env
 
   return {
     indexers,
