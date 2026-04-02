@@ -5,11 +5,11 @@ const express = require("express");
 const axios   = require("axios");
 const Redis   = require("ioredis");
 const path    = require("path");
+const fs      = require("fs"); // ⚡ NOVO: Adicionado para checar a existência do arquivo HTML
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-
 app.use((_, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -45,7 +45,7 @@ const rc = {
 };
 
 // ─────────────────────────────────────────────────────────
-// ⚡ NOVO: CACHE VERSION para invalidar cache antigo
+// CACHE VERSION
 // ─────────────────────────────────────────────────────────
 const CACHE_VERSION = "v4-ptbr";
 
@@ -56,7 +56,6 @@ const ANIME_ONLY_IDS = new Set([
   "nyaasi", "animetosho", "animez", "nekobt",
   "animebytes", "anidex", "tokyotosho", "animeworld",
 ]);
-
 function isAnimeOnly(id) {
   if (!id) return false;
   const norm = id.toLowerCase().replace(/[-_\s]/g, "");
@@ -68,7 +67,6 @@ function isAnimeOnly(id) {
 
 let _ixCache    = null;
 let _ixCacheAt  = 0;
-
 async function getCachedIndexers() {
   if (_ixCache && Date.now() - _ixCacheAt < 300_000) return _ixCache;
   try {
@@ -122,7 +120,8 @@ async function setRateLimit(indexer, retryAfterHeader) {
 // CONFIG
 // ─────────────────────────────────────────────────────────
 function decodeUserCfg(str) {
-  try { return JSON.parse(Buffer.from(str, "base64url").toString()); } catch { return null; }
+  try { return JSON.parse(Buffer.from(str, "base64url").toString());
+  } catch { return null; }
 }
 function defaultPrefs() {
   return {
@@ -130,8 +129,9 @@ function defaultPrefs() {
     categories:      ["movie", "series"],
     weights:         { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5 },
     maxResults:      20,
-    slowThreshold:   8000, // Usado apenas como referência - agora temos FAST/SLOW
+    slowThreshold:   8000,
     skipBadReleases: true,
+    onlyDubbed:      false,
   };
 }
 function resolvePrefs(encoded) {
@@ -189,7 +189,6 @@ const VISUAL = [
   { re: /\bsdr\b/i,                   label: "SDR"    },
 ];
 
-// ⚡ ADAPTADO: keywords expandidas para PT-BR
 const LANG = [
   { re: /(dublado|dual[-.\s]?(audio|2\.1|5\.1)?|pt[-.]?br|portugu[eê]s|portuguese|brazilian)/i,
     code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
@@ -197,15 +196,11 @@ const LANG = [
   { re: /(espa[nñ]ol|spanish|\besp\b)/i, code: "es", emoji: "🇪🇸", label: "ES" },
   { re: /(fran[cç]ais|french|\bfre\b)/i, code: "fr", emoji: "🇫🇷", label: "FR" },
 ];
-
-// ⚡ ADAPTADO: keywords para multi-audio em anime
 const ANIME_MULTI_AUDIO = /multi[-.\s]?audio/i;
-
 const first     = (map, t) => map.find(e => e.re.test(t));
 const matchAll  = (map, t) => map.filter(e => e.re.test(t));
 const uniq      = arr => [...new Set(arr.filter(Boolean))];
 const normTitle = s => (s || "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
-
 function qp(extra = {}) {
   const p = { ...extra };
   if (ENV.apiKey) p.apikey = ENV.apiKey;
@@ -213,13 +208,12 @@ function qp(extra = {}) {
 }
 
 // ─────────────────────────────────────────────────────────
-// ANIME — validação de episódio no título do torrent
+// ANIME — validação
 // ─────────────────────────────────────────────────────────
 function animeEpisodeMatches(title, ep) {
   if (ep == null) return true;
   const t = (title || "").replace(/\./g, " ");
   const n = ep;
-
   for (const m of t.matchAll(/\b(\d{1,3})\s*[-~]\s*(\d{1,3})\b/g)) {
     const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
     if (n >= lo && n <= hi) return true;
@@ -240,13 +234,13 @@ function animeEpisodeMatches(title, ep) {
 }
 
 // ─────────────────────────────────────────────────────────
-// ⚡ NOVO: DEDUPLICAÇÃO AVANÇADA (adaptado do brdebrid)
+// DEDUPLICAÇÃO AVANÇADA
 // ─────────────────────────────────────────────────────────
 function normalizeForDedupe(str) {
   if (!str) return null;
   return str
-    .replace(/[\[\(][^\]\)]*[\]\)]/g, '') // Remove colchetes/parênteses
-    .replace(/⚡|✅|💾|🇧🇷|🔍|📡|🎬|🎥|📺|🎞️|🎧|🗣️|📦|🌱|🏷️|⚠️|💿|🌐|🖥️|📼|📀/g, '') // Remove emojis
+    .replace(/[\[\(][^\]\)]*[\]\)]/g, '') 
+    .replace(/⚡|✅|💾|🇧🇷|🔍|📡|🎬|🎥|📺|🎞️|🎧|🗣️|📦|🌱|🏷️|⚠️|💿|🌐|🖥️|📼|📀/g, '') 
     .replace(/\b(dual|dub|leg|pt\.?br|portuguese|4k|1080p|720p|480p|remux|bluray|webrip|web\.dl|hdtv|hdrip|brrip|dvdrip|hevc|x264|x265|aac|ac3|10bit)\b/gi, '')
     .replace(/[^a-z0-9\s]/gi, ' ')
     .replace(/\s+/g, ' ')
@@ -259,7 +253,6 @@ function dedupeResults(results) {
   const seenFile  = new Set();
   const seenTitle = new Set();
   const deduped   = [];
-
   for (const r of results) {
     const hash = r.InfoHash ? r.InfoHash.toLowerCase() : null;
     const filename = r.Title
@@ -267,16 +260,10 @@ function dedupeResults(results) {
       : null;
     const titleKey = normalizeForDedupe(r.Title);
 
-    // Dedupe por hash
     if (hash && seenHash.has(hash)) continue;
-    
-    // Dedupe por filename (título completo sem extensão)
     if (filename && seenFile.has(filename)) continue;
-    
-    // Dedupe por título normalizado (>8 chars para evitar falsos positivos)
     if (titleKey && titleKey.length > 8 && seenTitle.has(titleKey)) continue;
-
-    // Se não tem nenhum identificador único, tenta por URL/Guid
+    
     if (!hash && !filename && !titleKey) {
       const key = [r.Guid||"", r.Link||"", r.MagnetUri||"", r.Tracker||""].join("|");
       if (seenHash.has(key)) continue;
@@ -285,13 +272,11 @@ function dedupeResults(results) {
       continue;
     }
 
-    // Adiciona aos Sets e ao resultado
     if (hash) seenHash.add(hash);
     if (filename) seenFile.add(filename);
     if (titleKey && titleKey.length > 8) seenTitle.add(titleKey);
     deduped.push(r);
   }
-
   return deduped;
 }
 
@@ -359,7 +344,7 @@ async function resolveInfoHash(r) {
       const infoBuf = extractInfoBuf(buf);
       if (infoBuf) return crypto.createHash("sha1").update(infoBuf).digest("hex");
     }
-  } catch (e) { console.log(`  ⚠️ resolveInfoHash: ${e.message}`); }
+  } catch (e) { }
   return null;
 }
 
@@ -374,32 +359,28 @@ function fmtBytes(bytes) {
 }
 
 // ─────────────────────────────────────────────────────────
-// ⚡ ADAPTADO: SCORE COM PRIORIZAÇÃO PT-BR
+// SCORE 
 // ─────────────────────────────────────────────────────────
 function score(r, weights = {}, isAnime = false) {
   const w = { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5, ...weights };
   const t = r.Title || "";
   let s = 0;
-
-  // ⚡ PRIORIDADE MÁXIMA para PT-BR (multiplicador 25x)
+  
   const lang = first(LANG, t);
   if (lang?.code === "pt-br") {
-    s += w.language * 25; // Boost massivo para dublado/dual
+    s += w.language * 25;
   } else if (lang?.code === "en") {
     s += w.language * 5;
   }
 
-  // ⚡ Para anime: multi-audio também tem boost
   if (isAnime && ANIME_MULTI_AUDIO.test(t)) {
     s += w.language * 15;
   }
 
   const res = first(RESOLUTION, t);
   if (res) s += res.score * w.resolution * 10;
-
   const qual = first(QUALITY, t);
   if (qual) s += qual.score * 50;
-
   s += (r.Seeders || 0) * (w.seeders / 10);
 
   const gb = (r.Size || 0) / 1e9;
@@ -412,19 +393,14 @@ function score(r, weights = {}, isAnime = false) {
 }
 
 // ─────────────────────────────────────────────────────────
-// ⚡ NOVO: RENOMEAÇÃO DE INDEXERS (adaptado do brdebrid)
+// RENOMEAÇÃO DE INDEXERS
 // ─────────────────────────────────────────────────────────
 function renameIndexer(name) {
   if (!name) return name;
   let renamed = name;
-  
-  // Remove prefixos comuns
   renamed = renamed.replace(/\[TORRENT🧲?\]\s*/gi, '');
-  
-  // Padroniza nomes brasileiros conhecidos
   renamed = renamed.replace(/🇧🇷\s*Rede/gi, 'Rede Torrent');
   renamed = renamed.replace(/🇧🇷\s*TorrentFilmes/gi, 'TorrentFilmes');
-  
   return renamed.trim();
 }
 
@@ -443,15 +419,12 @@ function formatStream(r, indexerName, isAnime = false) {
   const size   = fmtBytes(r.Size);
   const seeds  = r.Seeders || 0;
 
-  // ⚡ Renomeia indexer para exibição limpa
   const cleanIndexer = renameIndexer(indexerName);
-
   const n1 = `🔍 ProwJack · ${cleanIndexer}`;
   const n2 = [res ? res.emoji : "❔",
               qual ? `${qual.emoji} ${qual.label}` : "",
               vis.length ? vis.map(v => v.label).join(" | ") : ""].filter(Boolean).join("  ");
   
-  // ⚡ Destaca PT-BR e multi-audio para anime
   const langDisplay = [];
   if (langs.length) {
     langDisplay.push(langs.map(l => l.emoji).join(" "));
@@ -486,7 +459,7 @@ function formatStream(r, indexerName, isAnime = false) {
 }
 
 // ─────────────────────────────────────────────────────────
-// JACKETT — listar indexers
+// JACKETT
 // ─────────────────────────────────────────────────────────
 function normalizeIndexerList(raw) {
   if (!Array.isArray(raw) || !raw.length) return [];
@@ -522,14 +495,13 @@ async function jackettFetchIndexers() {
   let r;
   r = await tryEndpoint("s1:sem-configured", () =>
     axios.get(`${base}/api/v2.0/indexers`, { params: qp(), timeout, validateStatus: () => true }));
-  if (r) { console.log(`✅ indexers [s1]: ${r.length}`); return r; }
+  if (r) return r; 
 
   r = await tryEndpoint("s2:configured=true", () =>
     axios.get(`${base}/api/v2.0/indexers`, { params: qp({ configured: "true" }), timeout, validateStatus: () => true }));
-  if (r) { console.log(`✅ indexers [s2]: ${r.length}`); return r; }
+  if (r) return r; 
 
   try {
-    console.log("⚠️ indexers: fallback via /results...");
     const res = await axios.get(`${base}/api/v2.0/indexers/all/results`, {
       params: qp({ Query: "" }), timeout: 30000, validateStatus: () => true,
     });
@@ -540,20 +512,17 @@ async function jackettFetchIndexers() {
             .map(ix => ({ id: String(ix.ID||ix.id||"").trim(), name: String(ix.Name||ix.name||ix.ID||ix.id||"").trim() }))
             .filter(ix => ix.id && ix.id !== "all")
         : [];
-      if (fromIx.length) { console.log(`✅ indexers [s3/Indexers]: ${fromIx.length}`); return fromIx; }
+      if (fromIx.length) return fromIx; 
 
       const fromRes = uniq((res.data?.Results||[]).map(r2 => r2.TrackerId||r2.Tracker).filter(Boolean))
         .map(id => ({ id, name: id }));
-      if (fromRes.length) { console.log(`✅ indexers [s3/trackers]: ${fromRes.length}`); return fromRes; }
+      if (fromRes.length) return fromRes; 
     }
   } catch (e) { logs.push(`s3 ex: ${e.message}`); }
 
   throw new Error(`Jackett inacessível:\n${logs.map(l => "  • " + l).join("\n")}`);
 }
 
-// ─────────────────────────────────────────────────────────
-// ⚡ ADAPTADO: JACKETT SEARCH COM TIMEOUT DUAL
-// ─────────────────────────────────────────────────────────
 async function trackMetrics(indexer, ms, count, ok) {
   const key = `metrics:${indexer}`;
   const raw = await rc.get(key);
@@ -569,38 +538,26 @@ async function trackMetrics(indexer, ms, count, ok) {
 
 async function jackettSearch(queries, indexers, prefs) {
   const queryList = uniq(Array.isArray(queries) ? queries : [queries]);
-  
-  // ⚡ Cache key com versão para invalidar cache antigo
   const cacheKey = `search:${CACHE_VERSION}:${queryList.join("||")}:${indexers.join(",")}`;
   
-  // Verifica cache
   const cached = await rc.get(cacheKey);
   if (cached) { 
-    console.log(`⚡ Cache HIT (${CACHE_VERSION})`); 
     return JSON.parse(cached); 
   }
 
-  // ⚡ NOVO: Timeouts diferenciados
-  const FAST_TIMEOUT = 12000;  // Timeout por indexer na janela rápida
-  const SLOW_TIMEOUT = 50000;  // Timeout para background fetch
-
+  const FAST_TIMEOUT = 12000;
+  const SLOW_TIMEOUT = 50000; 
   const tasks = [];
-
+  
   for (const query of queryList) {
-    console.log(`🌐 Jackett: "${query}" [${indexers.join(", ")}]`);
     for (const indexer of indexers) {
       tasks.push({ query, indexer });
     }
   }
 
-  // Função de fetch reutilizável
   const fetchIndexer = async (task, timeout) => {
     const { query, indexer } = task;
-    
-    if (await isRateLimited(indexer)) {
-      console.log(`  ⏭️ ${indexer}: rate limit ativo`);
-      return [];
-    }
+    if (await isRateLimited(indexer)) return [];
     
     const t0 = Date.now();
     try {
@@ -616,73 +573,47 @@ async function jackettSearch(queries, indexers, prefs) {
         return [];
       }
       if (res.status >= 400) {
-        console.log(`  ❌ ${indexer}: HTTP ${res.status} (${ms}ms)`);
         await trackMetrics(indexer, ms, 0, false);
         return [];
       }
       
       const results = res.data?.Results || [];
       await trackMetrics(indexer, ms, results.length, true);
-      console.log(`  ✅ ${indexer}: ${results.length} (${ms}ms)`);
       return results;
     } catch (err) {
       const ms = Date.now() - t0;
       if (err.response?.status === 429)
         await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
       await trackMetrics(indexer, ms, 0, false);
-      
-      // ⚡ Não loga timeout na janela rápida como erro crítico
-      if (err.code === 'ECONNABORTED' && timeout === FAST_TIMEOUT) {
-        console.log(`  ⏱️ ${indexer}: timeout ${ms}ms (será retry em background)`);
-      } else {
-        console.log(`  ❌ ${indexer}: ${err.message}`);
-      }
       return [];
     }
   };
 
-  // ⚡ FASE 1: Resposta rápida (12s)
-  console.log(`⚡ Fase rápida: ${tasks.length} buscas com timeout ${FAST_TIMEOUT}ms`);
   const fastResults = await Promise.all(
     tasks.map(task => fetchIndexer(task, FAST_TIMEOUT))
   );
   const fastFlat = fastResults.flat();
   const fastDeduped = dedupeResults(fastFlat);
   
-  console.log(`⚡ Resposta rápida: ${fastFlat.length} resultados → ${fastDeduped.length} após dedupe`);
-
-  // Retorna cache parcial se vazio, evita re-fetch desnecessário
   if (fastDeduped.length === 0) {
-    console.log(`📦 Nenhum resultado na fase rápida, salvando cache vazio`);
-    await rc.set(cacheKey, JSON.stringify([]), 300); // Cache curto para retry
+    await rc.set(cacheKey, JSON.stringify([]), 300); 
     return [];
   }
 
-  // ⚡ FASE 2: Background fetch (assíncrono, não bloqueia resposta)
-  // Só executa se teve resultados parciais (evita re-tentar buscas vazias)
   setImmediate(async () => {
     try {
-      console.log(`\n🔄 [Background] Iniciando fetch completo...`);
-      
       const slowResults = await Promise.all(
         tasks.map(task => fetchIndexer(task, SLOW_TIMEOUT))
       );
-      
       const slowFlat = slowResults.flat();
       const slowDeduped = dedupeResults(slowFlat);
       
-      console.log(`📊 [Background] ${slowFlat.length} resultados → ${slowDeduped.length} após dedupe`);
-      
       if (slowDeduped.length > fastDeduped.length) {
-        console.log(`💾 [Background] Cache atualizado: ${fastDeduped.length} → ${slowDeduped.length} resultados`);
-        await rc.set(cacheKey, JSON.stringify(slowDeduped), 1800); // 30min
+        await rc.set(cacheKey, JSON.stringify(slowDeduped), 1800); 
       } else {
-        console.log(`💾 [Background] Salvando cache (sem novos resultados)`);
         await rc.set(cacheKey, JSON.stringify(fastDeduped), 1800);
       }
-    } catch (err) {
-      console.error(`🚨 [Background] erro: ${err.message}`);
-    }
+    } catch (err) {}
   });
 
   return fastDeduped;
@@ -724,14 +655,10 @@ async function getKitsuMeta(kitsuId) {
     ]).map(normTitle);
     return { title: aliases[0] || String(kitsuId), aliases };
   } catch (e) {
-    console.log(`  ⚠️ getKitsuMeta(${kitsuId}): ${e.message}`);
     return { title: String(kitsuId), aliases: [String(kitsuId)] };
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// STREAM ID PARSE + BUILD QUERIES
-// ─────────────────────────────────────────────────────────
 function parseStreamId(type, id) {
   if (id.startsWith("kitsu:")) {
     const parts   = id.split(":");
@@ -750,11 +677,9 @@ function parseStreamId(type, id) {
 
 async function buildQueries(type, id) {
   const parsed = parseStreamId(type, id);
-
   if (parsed.isAnime) {
     const meta = await getKitsuMeta(parsed.kitsuId);
     const ep   = parsed.episode;
-
     const queries = ep != null
       ? uniq(meta.aliases.flatMap(title => [
           `${title} - ${String(ep).padStart(2,"0")}`,
@@ -764,8 +689,6 @@ async function buildQueries(type, id) {
           `${title} Episode ${ep}`,
         ]))
       : uniq(meta.aliases);
-
-    console.log(`🌸 Kitsu ${parsed.kitsuId} ep${ep} → "${meta.title}" (${meta.aliases.length} aliases)`);
     return { parsed, displayTitle: meta.title, queries, episode: ep };
   }
 
@@ -817,7 +740,7 @@ app.delete("/api/metrics/:indexer", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// MANIFESTS
+// MANIFESTS & FRONTEND FIX
 // ─────────────────────────────────────────────────────────
 app.get("/manifest.json", (_, res) => {
   res.json({
@@ -828,8 +751,27 @@ app.get("/manifest.json", (_, res) => {
     behaviorHints: { configurable: true, configurationRequired: true, p2p: true },
   });
 });
-app.get("/configure", (_, res) =>
-  res.sendFile(path.join(__dirname, "public", "configure.html")));
+
+// ⚡ CORREÇÃO: Verifica de forma inteligente onde o configure.html está
+app.get("/configure", (_, res) => {
+  const publicPath = path.join(__dirname, "public", "configure.html");
+  const rootPath = path.join(__dirname, "configure.html");
+  
+  if (fs.existsSync(publicPath)) {
+    res.sendFile(publicPath);
+  } else if (fs.existsSync(rootPath)) {
+    res.sendFile(rootPath);
+  } else {
+    res.status(404).send(`
+      <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+        <h2>Erro 404: Arquivo não encontrado</h2>
+        <p>O servidor não conseguiu achar o arquivo <b>configure.html</b>.</p>
+        <p>Certifique-se de que ele está na mesma pasta que o script <b>addon.js</b>.</p>
+      </div>
+    `);
+  }
+});
+
 app.get("/", (_, res) => res.redirect("/configure"));
 
 app.get("/:userConfig/manifest.json", (req, res) => {
@@ -848,10 +790,9 @@ app.get("/:userConfig/manifest.json", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// ⚡ STREAMS COM TIMEOUT DUAL E PRIORIZAÇÃO PT-BR
+// STREAMS 
 // ─────────────────────────────────────────────────────────
 const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i;
-
 app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   const prefs = resolvePrefs(req.params.userConfig);
   const { type, id } = req.params;
@@ -860,29 +801,25 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     const { parsed, displayTitle, queries, episode } = await buildQueries(type, id);
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
 
-    console.log(`🎬 ${type} ${id} [${parsed.source}${parsed.isAnime ? ' anime' : ''}] indexers:[${indexers.join(",")}]`);
-    console.log(`   queries: ${JSON.stringify(queries)}`);
-
-    // ⚡ jackettSearch agora usa timeout dual internamente
     const results = await jackettSearch(queries, indexers, prefs);
 
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
       .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))
       .filter(r => !parsed.isAnime || episode == null || animeEpisodeMatches(r.Title || "", episode))
-      // ⚡ Score agora usa flag isAnime para boost de multi-audio
+      .filter(r => {
+        if (!prefs.onlyDubbed) return true;
+        const langs = matchAll(LANG, r.Title || "");
+        return langs.some(l => l.code === "pt-br");
+      })
       .sort((a, b) => score(b, prefs.weights, parsed.isAnime) - score(a, prefs.weights, parsed.isAnime))
       .slice(0, prefs.maxResults || 20);
-
-    console.log(`🔎 ${results.length} resultados → ${candidates.length} após filtros e ranking`);
 
     const resolved = await Promise.all(
       candidates.map(async r => {
         const infoHash = await resolveInfoHash(r);
-        if (!infoHash) { 
-          console.log(`  ⚠️ sem infoHash: "${(r.Title||"").slice(0,80)}"`); 
-          return null; 
-        }
+        if (!infoHash) return null; 
+        
         const indexerName = r.Tracker || r.TrackerId || "Unknown";
         const { name, description } = formatStream(r, indexerName, parsed.isAnime);
         const sources = r.MagnetUri ? [r.MagnetUri] : [];
@@ -896,12 +833,9 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         };
       })
     );
-
     const streams = resolved.filter(Boolean);
-    console.log(`✅ ${streams.length} streams → "${displayTitle}"`);
     res.json({ streams });
   } catch (err) {
-    console.error(`💥 ${err.message}`);
     res.json({ streams: [] });
   }
 });
@@ -914,7 +848,4 @@ app.listen(ENV.port, () => {
   console.log(`   Jackett : ${ENV.jackettUrl}`);
   console.log(`   ApiKey  : ${ENV.apiKey ? "✔" : "✗ não definida"}`);
   console.log(`   Redis   : ${ENV.redisUrl}`);
-  console.log(`   ⚡ NOVO: Timeout dual (12s fast + 50s background)`);
-  console.log(`   🇧🇷 NOVO: Priorização PT-BR (dual/dublado/brazilian)`);
-  console.log(`   📦 NOVO: Deduplicação avançada + renomeação indexers`);
 });
