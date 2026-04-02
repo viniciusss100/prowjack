@@ -1,0 +1,17 @@
+services:
+  prowjack:
+    build: .
+    container_name: prowjack
+    restart: unless-stopped
+    networks:
+      - npm-net
+    ports:
+      - "7014:7014"
+    environment:
+      - JACKETT_URL=http://jackett:9117
+      - JACKETT_API_KEY=<minhakey>
+      - REDIS_URL=redis://redis:6379
+      - PORT=7014
+      - INDEXERS=capybarabr,samaritano,seedpool-api
+    depends_on:
+      - redis
