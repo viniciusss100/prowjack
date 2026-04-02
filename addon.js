@@ -44,15 +44,16 @@ const rc = {
   async keys(p)        { try { return redis ? await redis.keys(p) : []; } catch { return []; } },
 };
 
-const CACHE_VERSION = "v4-ptbr-strict-proxy";
+const CACHE_VERSION = "v4-ptbr-strict-proxy-v3";
 
 // ─────────────────────────────────────────────────────────
-// INDEXERS 
+// INDEXERS (ISOLAMENTO DE ANIME APLICADO)
 // ─────────────────────────────────────────────────────────
 const ANIME_ONLY_IDS = new Set([
   "nyaasi", "animetosho", "animez", "nekobt",
   "animebytes", "anidex", "tokyotosho", "animeworld",
 ]);
+
 function isAnimeOnly(id) {
   if (!id) return false;
   const norm = id.toLowerCase().replace(/[-_\s]/g, "");
@@ -79,21 +80,18 @@ async function resolveSearchIndexers(prefs, isAnime) {
   const selected = (Array.isArray(prefs.indexers) ? prefs.indexers : []).filter(Boolean);
   const useAll   = !selected.length || selected.includes("all");
 
+  const allList = await getCachedIndexers();
+  const pool = useAll ? allList.map(ix => ix.id) : selected;
+
   if (isAnime) {
-    if (useAll) return ["all"];
-    return selected;
+    const animePool = pool.filter(id => isAnimeOnly(id));
+    if (animePool.length > 0) return animePool;
+    console.log(`⚠️ Nenhum indexer de anime encontrado na configuração, usando pool geral (pode causar rate limits)`);
+    return pool;
   }
 
-  let pool;
-  if (useAll) {
-    const allList = await getCachedIndexers();
-    pool = allList.length ? allList.map(ix => ix.id).filter(id => !isAnimeOnly(id)) : null;
-  } else {
-    pool = selected.filter(id => !isAnimeOnly(id));
-  }
-
-  if (pool && pool.length > 0) return pool;
-  return useAll ? ["all"] : selected;
+  const generalPool = pool.filter(id => !isAnimeOnly(id));
+  return generalPool.length > 0 ? generalPool : pool;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -188,12 +186,12 @@ const VISUAL = [
 ];
 
 const LANG = [
-  { re: /(dublado|dual[-.\s]?(audio|2\.1|5\.1)?|pt[-.]?br|portugu[eê]s|portuguese|brazilian)/i, code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
+  { re: /(dublado|pt[-.]?br|portugu[eê]s|portuguese|brazilian)/i, code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
   { re: /\b(english|eng)\b/i,  code: "en", emoji: "🇺🇸", label: "EN" },
   { re: /(espa[nñ]ol|spanish|\besp\b)/i, code: "es", emoji: "🇪🇸", label: "ES" },
   { re: /(fran[cç]ais|french|\bfre\b)/i, code: "fr", emoji: "🇫🇷", label: "FR" },
 ];
-const ANIME_MULTI_AUDIO = /multi[-.\s]?audio/i;
+
 const first     = (map, t) => map.find(e => e.re.test(t));
 const matchAll  = (map, t) => map.filter(e => e.re.test(t));
 const uniq      = arr => [...new Set(arr.filter(Boolean))];
@@ -205,7 +203,24 @@ function qp(extra = {}) {
 }
 
 // ─────────────────────────────────────────────────────────
-// ⚡ FILTRO ESTRITO DE EPISÓDIOS (SERIES E ANIME)
+// ⚡ INTELIGÊNCIA DE IDIOMA (Lógica Especial de DUAL)
+// ─────────────────────────────────────────────────────────
+function getLangs(title, isAnime) {
+    const langs = matchAll(LANG, title);
+    const isDual = /(dual|multi)[-.\s]?(audio|2\.1|5\.1)?/i.test(title);
+    
+    if (isDual) {
+        if (!isAnime) {
+            if (!langs.some(l => l.code === "pt-br")) {
+                langs.push({ code: "pt-br", emoji: "🇧🇷", label: "PT-BR" });
+            }
+        }
+    }
+    return langs;
+}
+
+// ─────────────────────────────────────────────────────────
+// FILTRO ESTRITO DE EPISÓDIOS (SERIES E ANIME)
 // ─────────────────────────────────────────────────────────
 function seriesEpisodeMatches(title, season, episode) {
   if (season == null || episode == null) return true;
@@ -374,11 +389,16 @@ function score(r, weights = {}, isAnime = false) {
   const t = r.Title || "";
   let s = 0;
   
-  const lang = first(LANG, t);
-  if (lang?.code === "pt-br") s += w.language * 25;
-  else if (lang?.code === "en") s += w.language * 5;
+  const langs = getLangs(t, isAnime);
+  const hasPtBr = langs.some(l => l.code === "pt-br");
+  const hasEn = langs.some(l => l.code === "en");
 
-  if (isAnime && ANIME_MULTI_AUDIO.test(t)) s += w.language * 15;
+  if (hasPtBr) s += w.language * 25;
+  else if (hasEn) s += w.language * 5;
+
+  if (isAnime && /(multi|dual)[-.\s]?(audio)?/i.test(t)) {
+      s += w.language * 15;
+  }
 
   const res = first(RESOLUTION, t);
   if (res) s += res.score * w.resolution * 10;
@@ -409,7 +429,7 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}) {
   const codec  = first(CODEC, t);
   const audios = matchAll(AUDIO, t);
   const vis    = matchAll(VISUAL, t);
-  const langs  = matchAll(LANG, t);
+  const langs  = getLangs(t, isAnime);
   const group  = extractGroup(t);
   const size   = fmtBytes(r.Size);
   const seeds  = r.Seeders || 0;
@@ -421,7 +441,7 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}) {
   const langDisplay = [];
   if (langs.length) langDisplay.push(langs.map(l => l.emoji).join(" "));
   else langDisplay.push("🌐");
-  if (isAnime && ANIME_MULTI_AUDIO.test(t)) langDisplay.push("🎧 Multi-Audio");
+  if (isAnime && /(multi|dual)[-.\s]?(audio)?/i.test(t)) langDisplay.push("🎧 Multi/Dual-Audio");
   
   const n3 = [langDisplay.join(" "), codec ? `🎞️ ${codec.label}` : "", seeds > 0 ? `🌱 ${seeds}` : ""].filter(Boolean).join("  ");
   const clean = t.replace(/\b\d{4}\b\.?/g, " ").replace(/\./g, " ").replace(/\s{2,}/g, " ").trim();
@@ -644,9 +664,9 @@ app.get("/:userConfig/manifest.json", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// ⚡ STREAMS COM BACKEND PROXY (THE MAGIC!)
+// ⚡ STREAMS COM BACKEND PROXY
 // ─────────────────────────────────────────────────────────
-const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i;
+const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i; // ⚡ RESTAURADO AQUI!
 
 app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   const prefs = resolvePrefs(req.params.userConfig);
@@ -655,14 +675,12 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   console.log(`\n=========================================`);
   console.log(`🍿 NOVA BUSCA: [${type}] ${id}`);
 
-  // ⚡ SE TIVER STREMTHRU ATIVO -> AGE COMO PROXY
   if (prefs.stConfig) {
       console.log(`🔄 [PROXY] Conversão Debrid Ativa! Falando com StremThru de forma oculta...`);
       
-      // Cria a config crua do ProwJack (sem ST) para evitar loop infinito
       const rawPrefs = { ...prefs };
       delete rawPrefs.stConfig;
-      rawPrefs.debrid = true; // Mantém a flag para ocultar ícone P2P
+      rawPrefs.debrid = true; 
       
       const rawB64 = Buffer.from(JSON.stringify(rawPrefs), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const protocol = req.headers['x-forwarded-proto'] || req.protocol;
@@ -679,7 +697,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       
       try {
           const { data } = await axios.get(stUrl, {
-              timeout: 60000, // Timeout folgado para dar tempo ao StremThru processar
+              timeout: 60000, 
               headers: { "User-Agent": "ProwJack/3.6" }
           });
           console.log(`✅ [PROXY] Sucesso! StremThru converteu e devolveu ${data?.streams?.length || 0} links.`);
@@ -692,7 +710,6 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       }
   }
 
-  // ⚡ CASO CONTRÁRIO (Ou quando o StremThru chama de volta) -> BUSCA NORMAL NO JACKETT
   try {
     const { parsed, displayTitle, queries, episode } = await buildQueries(type, id);
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
@@ -703,7 +720,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
-      .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))
+      .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || "")) // ⚡ FILTRO AGORA FUNCIONA
       .filter(r => {
         if (parsed.isAnime) return animeEpisodeMatches(r.Title || "", episode);
         if (type === "series") {
@@ -715,7 +732,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       })
       .filter(r => {
         if (!prefs.onlyDubbed) return true;
-        return matchAll(LANG, r.Title || "").some(l => l.code === "pt-br");
+        return getLangs(r.Title || "", parsed.isAnime).some(l => l.code === "pt-br");
       })
       .sort((a, b) => score(b, prefs.weights, parsed.isAnime) - score(a, prefs.weights, parsed.isAnime))
       .slice(0, prefs.maxResults || 20);
