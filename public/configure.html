@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ProwJack PRO — Configurar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#0b0c0f;--sur:#111318;--bord:#1e2230;--bord2:#2a3048;
+  --amber:#f5a623;--amber2:#e8890a;--adim:#7a500e;
+  --green:#2dce6c;--red:#e05050;--text:#c8cfe8;--dim:#5a6280;
+  --mono:'Space Mono',monospace;--sans:'Barlow Condensed',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px);pointer-events:none;z-index:9999}
+
+/* HEADER */
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--bord);position:sticky;top:0;background:rgba(11,12,15,.96);backdrop-filter:blur(8px);z-index:100}
+.logo-wrap{display:flex;align-items:baseline;gap:10px}
+.logo-name{font-family:var(--sans);font-weight:900;font-size:24px;letter-spacing:2px;color:#fff;text-transform:uppercase}
+.logo-v{font-size:10px;color:var(--amber);background:rgba(245,166,35,.12);border:1px solid var(--adim);padding:2px 7px;border-radius:2px}
+.logo-sub{font-family:var(--sans);font-size:12px;font-weight:300;color:var(--dim);letter-spacing:3px;text-transform:uppercase}
+.status-row{display:flex;align-items:center;gap:16px;font-size:11px;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:5px}
+.dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
+.dot.wait{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+
+/* TABS */
+.tabs{display:flex;padding:0 28px;border-bottom:1px solid var(--bord)}
+.tab{padding:13px 18px;font-family:var(--sans);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--amber);border-bottom-color:var(--amber)}
+
+/* PANES */
+.pane{display:none;padding:28px}
+.pane.active{display:block}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:1080px}
+.g2 .full{grid-column:1/-1}
+@media(max-width:680px){.g2{grid-template-columns:1fr}}
+
+/* CARD */
+.card{background:var(--sur);border:1px solid var(--bord);border-radius:4px;padding:20px}
+.ctitle{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.ctitle::before{content:'▶';font-size:8px;opacity:.5}
+
+/* ENV INFO BOX */
+.env-box{background:#060709;border:1px solid var(--bord2);border-radius:3px;padding:12px 14px;margin-bottom:14px;font-size:11px;line-height:2}
+.env-row{display:flex;gap:12px;align-items:center}
+.env-key{color:var(--dim);min-width:90px;letter-spacing:1px;text-transform:uppercase;font-size:10px}
+.env-val{color:var(--green);font-family:var(--mono)}
+.env-val.warn{color:var(--amber)}
+.env-val.err{color:var(--red)}
+
+/* FORM */
+label{display:block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+input[type=text],input[type=number]{width:100%;background:#080910;border:1px solid var(--bord2);color:var(--text);padding:9px 12px;font-family:var(--mono);font-size:12px;border-radius:3px;outline:none;margin-bottom:14px;transition:.15s}
+input:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.1)}
+
+/* SLIDERS */
+.w-row{display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:10px;margin-bottom:10px}
+.w-label{font-size:11px;letter-spacing:1px;text-transform:uppercase}
+.w-val{font-family:var(--mono);font-size:13px;color:var(--amber);text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:var(--bord2);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--amber);border-radius:50%;cursor:pointer;transition:.15s}
+input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px var(--amber)}
+
+/* INDEXERS */
+.ix-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.ix-search{flex:1;min-width:140px;max-width:220px;margin:0!important;padding:7px 10px!important}
+.ix-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:7px;max-height:340px;overflow-y:auto}
+.ix-grid::-webkit-scrollbar{width:3px}
+.ix-grid::-webkit-scrollbar-thumb{background:var(--bord2);border-radius:2px}
+.ix-item{display:flex;align-items:center;gap:8px;background:#080910;border:1px solid var(--bord);border-radius:3px;padding:7px 10px;cursor:pointer;transition:.15s;user-select:none}
+.ix-item:hover{border-color:var(--bord2)}
+.ix-item.on{border-color:var(--adim);background:rgba(245,166,35,.06)}
+.ix-item input[type=checkbox]{accent-color:var(--amber);cursor:pointer;flex-shrink:0}
+.ix-item span{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ix-empty{padding:40px;text-align:center;color:var(--dim);font-size:12px}
+
+/* TOGGLES */
+.tg-group{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.tg{padding:6px 14px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--bord2);background:transparent;color:var(--dim);border-radius:2px;cursor:pointer;transition:.15s}
+.tg:hover{border-color:var(--adim);color:var(--text)}
+.tg.on{border-color:var(--amber);background:rgba(245,166,35,.12);color:var(--amber)}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;font-family:var(--sans);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;border:none;border-radius:3px;cursor:pointer;transition:.15s;text-decoration:none}
+.btn-p{background:var(--amber);color:#000}
+.btn-p:hover{background:#fff;box-shadow:0 0 18px rgba(245,166,35,.4)}
+.btn-s{background:transparent;border:1px solid var(--bord2);color:var(--dim)}
+.btn-s:hover{border-color:var(--adim);color:var(--text)}
+.btn-d{background:transparent;border:1px solid rgba(224,80,80,.3);color:var(--red);font-size:10px;padding:3px 9px}
+.btn-d:hover{border-color:var(--red);background:rgba(224,80,80,.1)}
+.btn-sm{padding:5px 12px;font-size:10px}
+
+/* INSTALL BOX */
+.ibox{margin-top:20px;background:#060709;border:1px solid var(--bord2);border-radius:4px;overflow:hidden}
+.ibox-head{background:rgba(245,166,35,.07);border-bottom:1px solid var(--bord2);padding:9px 14px;font-family:var(--sans);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--amber)}
+.ibox-url{padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.9}
+.ibox-url.empty{color:var(--dim);font-style:italic}
+.ibox-foot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--bord)}
+
+/* METRICS */
+.metrics-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.mc{background:var(--sur);border:1px solid var(--bord);border-radius:4px;padding:14px}
+.mc-name{font-family:var(--sans);font-weight:700;font-size:13px;color:#fff;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.mc-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px}
+.mk{color:var(--dim)}
+.mv{font-family:var(--mono)}
+.mv.ok{color:var(--green)}.mv.warn{color:var(--amber)}.mv.bad{color:var(--red)}
+.bar{margin-top:8px;height:3px;background:var(--bord2);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;background:var(--green);border-radius:2px;transition:width .5s}
+.empty{text-align:center;padding:50px;color:var(--dim);font-size:12px}
+
+/* TOAST */
+#toast{position:fixed;bottom:20px;right:20px;background:var(--sur);border:1px solid var(--bord2);border-left:3px solid var(--amber);color:var(--text);padding:10px 18px;border-radius:3px;font-size:12px;transform:translateY(70px);opacity:0;transition:.3s;z-index:9998;max-width:320px}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.err{border-left-color:var(--red)}
+
+hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.info{font-size:11px;color:var(--dim);line-height:1.7}
+.mt8{margin-top:8px}.mt14{margin-top:14px}.mt20{margin-top:20px}
+@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
+.loading{animation:pulse 1.2s infinite}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo-wrap">
+      <span class="logo-name">ProwJack</span>
+      <span class="logo-v">PRO v3.0</span>
+    </div>
+    <div class="logo-sub">Stremio · Jackett · Smart Ranking</div>
+  </div>
+  <div class="status-row">
+    <div><span class="dot" id="d-redis"></span><span id="l-redis">Redis</span></div>
+    <div><span class="dot" id="d-jackett"></span><span id="l-jackett">Jackett</span></div>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-tab="setup">⚙️ Configurar</button>
+  <button class="tab" data-tab="ranking">🎯 Ranking</button>
+  <button class="tab" data-tab="metrics">📊 Métricas</button>
+</div>
+
+<!-- ═══════ SETUP ═══════ -->
+<div class="pane active" id="pane-setup">
+<div class="g2">
+
+  <!-- Conexão (somente leitura — credenciais da env) -->
+  <div class="card">
+    <div class="ctitle">Conexão Jackett</div>
+    <p class="info" style="margin-bottom:12px">Credenciais carregadas das variáveis de ambiente do Docker. Nenhuma credencial é armazenada na URL de instalação.</p>
+    <div class="env-box" id="env-box">
+      <div class="env-row"><span class="env-key">URL</span><span class="env-val loading" id="ev-url">carregando...</span></div>
+      <div class="env-row"><span class="env-key">API Key</span><span class="env-val" id="ev-key">—</span></div>
+      <div class="env-row"><span class="env-key">Indexers env</span><span class="env-val" id="ev-ix">—</span></div>
+    </div>
+    <button class="btn btn-p" onclick="testConnection()">▶ Testar Conexão</button>
+    <div id="test-log" class="mt8" style="display:none;font-size:11px;color:var(--dim)"></div>
+  </div>
+
+  <!-- Categorias e limites -->
+  <div class="card">
+    <div class="ctitle">Categorias &amp; Limites</div>
+    <label>Tipos de conteúdo</label>
+    <div class="tg-group">
+      <button class="tg on" data-cat="movie">🎬 Filmes</button>
+      <button class="tg on" data-cat="series">📺 Séries</button>
+      <button class="tg" data-cat="anime">🌸 Anime</button>
+    </div>
+    <label>Máximo de resultados</label>
+    <div class="w-row">
+      <div class="w-label">Resultados</div>
+      <input type="range" id="maxResults" min="5" max="50" step="5" value="20" oninput="sv(this,'maxResults-v')"/>
+      <div class="w-val" id="maxResults-v">20</div>
+    </div>
+    <label>Timeout por indexer (ms)</label>
+    <div class="w-row">
+      <div class="w-label">Timeout</div>
+      <input type="range" id="slowThreshold" min="2000" max="20000" step="1000" value="8000" oninput="sv(this,'st-v')"/>
+      <div class="w-val" id="st-v">8000</div>
+    </div>
+    <div class="tg-group mt8">
+      <button class="tg on" id="skipBadBtn" onclick="this.classList.toggle('on')">⛔ Ignorar CAM/TS</button>
+    </div>
+  </div>
+
+  <!-- Indexers — seleção via UI desativada temporariamente -->
+  <div class="card full" style="border-color:var(--adim)">
+    <div class="ctitle">Indexers</div>
+    <div class="env-box" id="ix-active-box">
+      <div class="env-row">
+        <span class="env-key">Ativos</span>
+        <span class="env-val" id="ev-ix-active">carregando...</span>
+      </div>
+      <div class="env-row">
+        <span class="env-key">Origem</span>
+        <span class="env-val" style="color:var(--amber)">variável de ambiente INDEXERS</span>
+      </div>
+    </div>
+    <p class="info">
+      Os indexers são definidos exclusivamente pela variável <code style="color:var(--amber);background:#060709;padding:1px 6px;border-radius:2px">INDEXERS</code> no Docker Compose.
+      A seleção pela interface está temporariamente desativada.
+    </p>
+  </div>
+
+  <!-- URL de instalação -->
+  <div class="card full">
+    <div class="ctitle">URL de Instalação</div>
+    <p class="info">Gere a URL com suas preferências e instale no Stremio. As credenciais do Jackett <strong>não</strong> entram na URL — ficam no servidor.</p>
+    <div class="row mt14">
+      <button class="btn btn-p" onclick="generate()">⚡ Gerar URL</button>
+      <button class="btn btn-s" onclick="copyUrl()">📋 Copiar</button>
+    </div>
+    <div class="ibox mt20">
+      <div class="ibox-head">🔗 Manifest URL</div>
+      <div class="ibox-url empty" id="ibox-url">— clique em Gerar URL —</div>
+      <div class="ibox-foot">
+        <a id="stremio-a" href="#" class="btn btn-p" style="pointer-events:none;opacity:.4">▶ Instalar no Stremio</a>
+        <button class="btn btn-s" onclick="copyUrl()">📋 Copiar</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ═══════ RANKING ═══════ -->
+<div class="pane" id="pane-ranking">
+<div style="max-width:520px">
+  <div class="card">
+    <div class="ctitle">Pesos do Score</div>
+    <p class="info" style="margin-bottom:16px">Pesos relativos — não precisam somar 100. Defina o que importa mais para você.</p>
+
+    <div class="w-row">
+      <div class="w-label">🇧🇷 Idioma</div>
+      <input type="range" id="w-lang" min="0" max="100" value="40" oninput="sv(this,'wv-lang');preview()"/>
+      <div class="w-val" id="wv-lang">40</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🎥 Resolução</div>
+      <input type="range" id="w-res" min="0" max="100" value="30" oninput="sv(this,'wv-res');preview()"/>
+      <div class="w-val" id="wv-res">30</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🌱 Seeders</div>
+      <input type="range" id="w-seed" min="0" max="100" value="20" oninput="sv(this,'wv-seed');preview()"/>
+      <div class="w-val" id="wv-seed">20</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">📦 Tamanho</div>
+      <input type="range" id="w-size" min="0" max="100" value="5" oninput="sv(this,'wv-size');preview()"/>
+      <div class="w-val" id="wv-size">5</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🎞️ Codec</div>
+      <input type="range" id="w-codec" min="0" max="100" value="5" oninput="sv(this,'wv-codec');preview()"/>
+      <div class="w-val" id="wv-codec">5</div>
+    </div>
+
+    <hr/>
+    <div class="ctitle" style="margin-top:4px">Preview de Score</div>
+    <pre id="preview-box" style="background:#060709;border:1px solid var(--bord);border-radius:3px;padding:12px;font-size:11px;line-height:1.9;overflow-x:auto;color:var(--green)"></pre>
+  </div>
+</div>
+</div>
+
+<!-- ═══════ MÉTRICAS ═══════ -->
+<div class="pane" id="pane-metrics">
+  <div style="max-width:1080px">
+    <div class="row" style="margin-bottom:16px">
+      <button class="btn btn-p" onclick="loadMetrics()">🔄 Atualizar</button>
+      <span class="info">Dados do Redis — últimas 24h</span>
+    </div>
+    <div class="metrics-g" id="metrics-g">
+      <div class="empty">Clique em Atualizar</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── STATE ─────────────────────────────────────
+const state = {
+  allIndexers:      [],   // { id, name } vindos do Jackett
+  selectedIndexers: [],
+  useAll:           true,
+};
+
+// ── HELPERS ───────────────────────────────────
+function sv(el, id) { document.getElementById(id).textContent = el.value; }
+function toast(msg, err=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (err ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 3200);
+}
+function dot(id, state) {   // 'ok' | 'err' | 'wait' | ''
+  document.getElementById('d-' + id).className = 'dot ' + state;
+}
+function label(id, txt) { document.getElementById('l-' + id).textContent = txt; }
+
+// ── TABS ──────────────────────────────────────
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab, .pane').forEach(e => e.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('pane-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'metrics') loadMetrics();
+}));
+
+// ── CATEGORIES ───────────────────────────────
+document.querySelectorAll('.tg[data-cat]').forEach(t =>
+  t.addEventListener('click', () => t.classList.toggle('on'))
+);
+function getCats() {
+  return [...document.querySelectorAll('.tg[data-cat].on')].map(t => t.dataset.cat);
+}
+
+// ── INIT: carregar env ────────────────────────
+async function loadEnv() {
+  try {
+    const env = await fetch('/api/env').then(r => r.json());
+    document.getElementById('ev-url').textContent = env.jackettUrl;
+    document.getElementById('ev-url').className   = 'env-val';
+    document.getElementById('ev-key').textContent = env.apiKeySet ? '✔ configurada' : '✗ não definida';
+    document.getElementById('ev-key').className   = 'env-val ' + (env.apiKeySet ? '' : 'err');
+    document.getElementById('ev-ix').textContent  = env.indexers.join(', ');
+    const ixActive = document.getElementById('ev-ix-active');
+    if (ixActive) ixActive.textContent = env.indexers.join(', ');
+    dot('redis', 'wait');
+    label('redis', 'Redis…');
+  } catch {
+    document.getElementById('ev-url').textContent = 'Erro ao carregar';
+    document.getElementById('ev-url').className   = 'env-val err';
+  }
+}
+
+// ── TEST CONNECTION ───────────────────────────
+async function testConnection() {
+  const logEl = document.getElementById('test-log');
+  logEl.style.display = 'block';
+  logEl.innerHTML = '<span class="loading">⏳ Conectando ao Jackett...</span>';
+  dot('jackett', 'wait');
+  label('jackett', 'Jackett…');
+
+  try {
+    const data = await fetch('/api/test').then(r => r.json());
+    if (data.ok) {
+      const note = data.note
+        ? `<br><span style="color:var(--amber)">⚠️ ${data.note}</span>` : '';
+      logEl.innerHTML = `<span style="color:var(--green)">✅ ${data.count} indexers encontrados</span>${note}`;
+      dot('jackett', 'ok');
+      label('jackett', `Jackett ✓ (${data.count})`);
+      renderIndexers(data.indexers);
+      toast(`${data.count} indexers carregados!`);
+    } else {
+      logEl.innerHTML = `<span style="color:var(--red)">❌ ${data.error}</span>
+        <br><span style="color:var(--dim)">Verifique JACKETT_URL e JACKETT_API_KEY nas env vars do Docker.</span>`;
+      dot('jackett', 'err');
+      label('jackett', 'Jackett ✗');
+    }
+  } catch(e) {
+    logEl.innerHTML = `<span style="color:var(--red)">❌ ${e.message}</span>`;
+    dot('jackett', 'err');
+    label('jackett', 'Jackett ✗');
+  }
+}
+
+// ── REDIS CHECK ───────────────────────────────
+async function checkRedis() {
+  try {
+    const metrics = await fetch('/api/metrics').then(r => r.json());
+    dot('redis', 'ok');
+    label('redis', 'Redis ✓');
+  } catch {
+    dot('redis', 'err');
+    label('redis', 'Redis ✗');
+  }
+}
+
+// ── INDEXERS ─────────────────────────────────
+function renderIndexers(list) {
+  state.allIndexers = list;
+  const grid = document.getElementById('ix-grid');
+
+  if (!list.length) {
+    grid.innerHTML = '<div class="ix-empty">Nenhum indexer configurado no Jackett</div>';
+    return;
+  }
+
+  grid.innerHTML = '';
+  list.forEach(ix => {
+    const id   = ix.id || ix.ID || ix.name;
+    const name = ix.name || id;
+    const sel  = state.useAll || state.selectedIndexers.includes(id);
+
+    const div = document.createElement('div');
+    div.className = 'ix-item' + (sel ? ' on' : '');
+    div.dataset.id = id;
+    div.innerHTML  = `<input type="checkbox" id="cb-${id}" ${sel?'checked':''}/>
+                      <span title="${name}">${name}</span>`;
+    div.querySelector('input').addEventListener('change', e => {
+      div.classList.toggle('on', e.target.checked);
+      syncSelected();
+    });
+    grid.appendChild(div);
+  });
+}
+
+function syncSelected() {
+  state.selectedIndexers =
+    [...document.querySelectorAll('#ix-grid .ix-item.on')].map(el => el.dataset.id);
+}
+
+function toggleAll() {
+  state.useAll = !document.getElementById('allBtn').classList.toggle('on');
+  state.useAll = document.getElementById('allBtn').classList.contains('on');
+  // Quando useAll=true, marca todos; quando false, deixa como está
+  if (state.useAll) selAll();
+}
+
+function selAll() {
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    el.classList.add('on');
+    el.querySelector('input').checked = true;
+  });
+  syncSelected();
+}
+function selNone() {
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    el.classList.remove('on');
+    el.querySelector('input').checked = false;
+  });
+  syncSelected();
+}
+function filterIx(q) {
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    el.style.display = el.querySelector('span').textContent.toLowerCase().includes(q.toLowerCase()) ? '' : 'none';
+  });
+}
+
+// ── WEIGHTS ───────────────────────────────────
+function getWeights() {
+  return {
+    language:   +document.getElementById('w-lang').value,
+    resolution: +document.getElementById('w-res').value,
+    seeders:    +document.getElementById('w-seed').value,
+    size:       +document.getElementById('w-size').value,
+    codec:      +document.getElementById('w-codec').value,
+  };
+}
+
+// ── SCORE PREVIEW ─────────────────────────────
+function preview() {
+  const w = getWeights();
+  const examples = [
+    { t: 'Duna.2021.1080p.BluRay.x265.Dublado.PT-BR-GRUPO', seeds: 850, sizeGb: 6.2 },
+    { t: 'Dune.2021.2160p.UHD.BluRay.REMUX.TrueHD.Atmos.x265-FGT',  seeds: 1500, sizeGb: 58 },
+    { t: 'Dune.2021.1080p.WEBRip.x264-NTG',                          seeds: 3200, sizeGb: 2.1 },
+    { t: 'Dune.2021.720p.WEB-DL.DD5.1.H264',                         seeds: 200,  sizeGb: 1.2 },
+  ];
+
+  function calcScore(ex) {
+    let s = 0;
+    if (/(dublado|pt[-.]?br)/i.test(ex.t)) s += w.language * 25;
+    if (/4k|2160/i.test(ex.t)) s += 4 * w.resolution * 10;
+    else if (/1080/i.test(ex.t)) s += 3 * w.resolution * 10;
+    else if (/720/i.test(ex.t)) s += 2 * w.resolution * 10;
+    if (/remux/i.test(ex.t)) s += 5 * 50;
+    else if (/bluray/i.test(ex.t)) s += 4 * 50;
+    else if (/webdl|web-dl/i.test(ex.t)) s += 3 * 50;
+    else if (/webrip/i.test(ex.t)) s += 2.5 * 50;
+    s += ex.seeds * (w.seeders / 10);
+    s += Math.max(0, 10 - Math.abs(ex.sizeGb - 8)) * w.size;
+    if (/x265|hevc/i.test(ex.t)) s += 3 * w.codec * 5;
+    else if (/x264|avc/i.test(ex.t)) s += 2 * w.codec * 5;
+    return Math.round(s);
+  }
+
+  const scored = examples
+    .map(e => ({ ...e, score: calcScore(e) }))
+    .sort((a, b) => b.score - a.score);
+
+  const box = document.getElementById('preview-box');
+  box.innerHTML = scored.map((e, i) => {
+    const flag = /(dublado|pt-br)/i.test(e.t) ? '🇧🇷' : '🌐';
+    return `${['🥇','🥈','🥉','4️⃣'][i]} ${flag} Score: <strong style="color:var(--amber)">${e.score}</strong>\n   ${e.t.substring(0,55)}...`;
+  }).join('\n\n');
+}
+
+// ── GENERATE URL ─────────────────────────────
+function buildPrefs() {
+  const indexers = state.useAll
+    ? ['all']
+    : state.selectedIndexers.length ? state.selectedIndexers : ['all'];
+
+  return {
+    indexers,
+    categories:      getCats(),
+    weights:         getWeights(),
+    maxResults:      +document.getElementById('maxResults').value,
+    slowThreshold:   +document.getElementById('slowThreshold').value,
+    skipBadReleases: document.getElementById('skipBadBtn').classList.contains('on'),
+  };
+}
+
+function generate() {
+  const prefs   = buildPrefs();
+  const encoded = btoa(JSON.stringify(prefs))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const manifestUrl = `${location.origin}/${encoded}/manifest.json`;
+  const stremioUrl  = `stremio://${location.host}/${encoded}/manifest.json`;
+
+  document.getElementById('ibox-url').textContent = manifestUrl;
+  document.getElementById('ibox-url').className   = 'ibox-url';
+
+  const link = document.getElementById('stremio-a');
+  link.href = stremioUrl;
+  link.style.pointerEvents = 'auto';
+  link.style.opacity = '1';
+
+  toast('URL gerada! Clique em Instalar no Stremio.');
+}
+
+function copyUrl() {
+  const url = document.getElementById('ibox-url').textContent;
+  if (url.startsWith('—')) { toast('Gere a URL primeiro', true); return; }
+  navigator.clipboard.writeText(url).then(() => toast('URL copiada!'));
+}
+
+// ── METRICS ──────────────────────────────────
+async function loadMetrics() {
+  const g = document.getElementById('metrics-g');
+  g.innerHTML = '<div class="empty loading">⏳ Carregando...</div>';
+  try {
+    const metrics = await fetch('/api/metrics').then(r => r.json());
+    const entries = Object.entries(metrics);
+    if (!entries.length) {
+      g.innerHTML = '<div class="empty">Nenhuma métrica. Faça uma busca no Stremio primeiro.</div>';
+      return;
+    }
+    g.innerHTML = entries.map(([name, m]) => {
+      const rc = m.successRate > 80 ? 'ok' : m.successRate > 50 ? 'warn' : 'bad';
+      const dc = m.avgMs < 2000 ? 'ok' : m.avgMs < 5000 ? 'warn' : 'bad';
+      return `<div class="mc">
+        <div class="mc-name">📡 ${name}
+          <button class="btn btn-d" onclick="delMetric('${name}')">Reset</button>
+        </div>
+        <div class="mc-row"><span class="mk">Chamadas</span><span class="mv">${m.calls}</span></div>
+        <div class="mc-row"><span class="mk">Avg resultados</span><span class="mv">${m.avgResults}</span></div>
+        <div class="mc-row"><span class="mk">Avg tempo</span><span class="mv ${dc}">${m.avgMs}ms</span></div>
+        <div class="mc-row"><span class="mk">Falhas</span><span class="mv ${m.failures>0?'bad':'ok'}">${m.failures}</span></div>
+        <div class="mc-row"><span class="mk">Sucesso</span><span class="mv ${rc}">${m.successRate}%</span></div>
+        <div class="mc-row"><span class="mk">Última</span><span class="mv" style="font-size:10px">${m.lastCall?new Date(m.lastCall).toLocaleString('pt-BR'):'—'}</span></div>
+        <div class="bar"><div class="bar-fill" style="width:${m.successRate||0}%"></div></div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    g.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${e.message}</div>`;
+  }
+}
+async function delMetric(name) {
+  await fetch(`/api/metrics/${name}`, { method:'DELETE' });
+  toast(`Métricas de ${name} resetadas`);
+  loadMetrics();
+}
+
+// ── BOOT ─────────────────────────────────────
+window.addEventListener('load', () => {
+  loadEnv();
+  checkRedis();
+  preview();
+});
+</script>
+</body>
+</html>
