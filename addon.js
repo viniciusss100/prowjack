@@ -45,6 +45,86 @@ const rc = {
 };
 
 // ─────────────────────────────────────────────────────────
+// INDEXERS — separação anime / filmes+séries
+// ─────────────────────────────────────────────────────────
+
+// IDs exatos de indexers exclusivos de anime (apenas kitsu)
+const ANIME_ONLY_IDS = new Set([
+  "nyaasi", "animetosho", "animez", "nekobt",
+  "animebytes", "anidex", "tokyotosho", "animeworld",
+]);
+
+function isAnimeOnly(id) {
+  if (!id) return false;
+  const norm = id.toLowerCase().replace(/[-_\s]/g, "");
+  // Verifica match exato ou prefixo para variações como "nyaasi2", "animez_api" etc.
+  for (const known of ANIME_ONLY_IDS) {
+    if (norm === known || norm.startsWith(known)) return true;
+  }
+  return false;
+}
+
+// Cache da lista de indexers (5 min) para não chamar Jackett a cada stream
+let _ixCache    = null;
+let _ixCacheAt  = 0;
+
+async function getCachedIndexers() {
+  if (_ixCache && Date.now() - _ixCacheAt < 300_000) return _ixCache;
+  try {
+    _ixCache   = await jackettFetchIndexers();
+    _ixCacheAt = Date.now();
+  } catch {
+    _ixCache = _ixCache || [];
+  }
+  return _ixCache;
+}
+
+// Retorna lista de indexers para a busca, aplicando o roteamento correto
+async function resolveSearchIndexers(prefs, isAnime) {
+  const selected = (Array.isArray(prefs.indexers) ? prefs.indexers : []).filter(Boolean);
+  const useAll   = !selected.length || selected.includes("all");
+
+  if (isAnime) {
+    // Anime: usa todos os selecionados (inclui anime-only)
+    if (useAll) return ["all"];
+    return selected;
+  }
+
+  // Filmes/séries: NUNCA inclui anime-only
+  let pool;
+
+  if (useAll) {
+    // Expande "all" para lista real de indexers e filtra anime-only
+    const allList = await getCachedIndexers();
+    pool = allList.length
+      ? allList.map(ix => ix.id).filter(id => !isAnimeOnly(id))
+      : null; // não conseguiu expandir
+  } else {
+    pool = selected.filter(id => !isAnimeOnly(id));
+  }
+
+  // Se após filtrar sobrou algo, usa; caso contrário, usa "all" com aviso
+  // (significa que o usuário só tem indexers de anime configurados — incomum)
+  if (pool && pool.length > 0) return pool;
+
+  console.warn("⚠️ resolveSearchIndexers: nenhum indexer não-anime disponível, usando 'all' como fallback");
+  return useAll ? ["all"] : selected;
+}
+
+// ─────────────────────────────────────────────────────────
+// RATE LIMIT por indexer (Redis)
+// ─────────────────────────────────────────────────────────
+async function isRateLimited(indexer) {
+  return !!(await rc.get(`rl:${indexer}`));
+}
+async function setRateLimit(indexer, retryAfterHeader) {
+  const parsed = parseInt(retryAfterHeader || "", 10);
+  const ttl    = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 3600) : 90;
+  await rc.set(`rl:${indexer}`, "1", ttl);
+  console.log(`  🚫 ${indexer}: rate limited por ${ttl}s`);
+}
+
+// ─────────────────────────────────────────────────────────
 // CONFIG
 // ─────────────────────────────────────────────────────────
 function decodeUserCfg(str) {
@@ -61,10 +141,10 @@ function defaultPrefs() {
   };
 }
 function resolvePrefs(encoded) {
-  const userPrefs = encoded ? (decodeUserCfg(encoded) || {}) : {};
-  const merged = { ...defaultPrefs(), ...userPrefs };
-  if (!Array.isArray(merged.indexers) || !merged.indexers.length) merged.indexers = ["all"];
-  return merged;
+  const u = encoded ? (decodeUserCfg(encoded) || {}) : {};
+  const m = { ...defaultPrefs(), ...u };
+  if (!Array.isArray(m.indexers) || !m.indexers.length) m.indexers = ["all"];
+  return m;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -117,24 +197,57 @@ const VISUAL = [
 const LANG = [
   { re: /(dublado|dual.?audio|pt[-.]?br|portugu[eê]s|portuguese|brazilian)/i,
     code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
-  { re: /\b(english|eng)\b/i,
-    code: "en", emoji: "🇺🇸", label: "EN" },
-  { re: /(espa[nñ]ol|spanish|\besp\b)/i,
-    code: "es", emoji: "🇪🇸", label: "ES" },
-  { re: /(fran[cç]ais|french|\bfre\b)/i,
-    code: "fr", emoji: "🇫🇷", label: "FR" },
+  { re: /\b(english|eng)\b/i,  code: "en", emoji: "🇺🇸", label: "EN" },
+  { re: /(espa[nñ]ol|spanish|\besp\b)/i, code: "es", emoji: "🇪🇸", label: "ES" },
+  { re: /(fran[cç]ais|french|\bfre\b)/i, code: "fr", emoji: "🇫🇷", label: "FR" },
 ];
 
-const first = (map, t) => map.find(e => e.re.test(t));
-const all   = (map, t) => map.filter(e => e.re.test(t));
-const uniq  = arr => [...new Set(arr.filter(Boolean))];
+const first     = (map, t) => map.find(e => e.re.test(t));
+const matchAll  = (map, t) => map.filter(e => e.re.test(t));
+const uniq      = arr => [...new Set(arr.filter(Boolean))];
 const normTitle = s => (s || "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 
-// Monta params sem incluir apikey vazio
 function qp(extra = {}) {
   const p = { ...extra };
   if (ENV.apiKey) p.apikey = ENV.apiKey;
   return p;
+}
+
+// ─────────────────────────────────────────────────────────
+// ANIME — validação de episódio no título do torrent
+// ─────────────────────────────────────────────────────────
+function animeEpisodeMatches(title, ep) {
+  if (ep == null) return true;
+  const t = (title || "").replace(/\./g, " ");
+  const n = ep;
+
+  // 1. Batch com range: "01-12", "01~24" — aceita se ep está no range
+  for (const m of t.matchAll(/\b(\d{1,3})\s*[-~]\s*(\d{1,3})\b/g)) {
+    const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
+    if (n >= lo && n <= hi) return true;
+  }
+
+  // 2. Episódio explícito com keyword: "- 01", "[01]", "E01", "Ep01", "Episode 1"
+  const pad2 = String(n).padStart(2, "0");
+  const pad3 = String(n).padStart(3, "0");
+
+  // Padrão Nyaa mais comum: "- 01 [" ou "- 01v2 [" ou "- 01 ("
+  if (new RegExp(`-\\s*0*${n}(?:v\\d+)?\\s*[\\[\\(\\s]`, "i").test(t)) return true;
+
+  // Colchetes: [01], [001]
+  for (const v of [pad2, pad3, String(n)]) {
+    if (new RegExp(`\\[0*${n}(?:v\\d+)?\\]`).test(t)) return true;
+    // Espaço/separador antes e depois
+    if (new RegExp(`(?<=[\\s\\._\\-\\[\\(])0*${v}(?:v\\d+)?(?=[\\s\\._\\-\\]\\)\\[]|$)`, "i").test(t)) return true;
+  }
+
+  // E01 / Ep01 / Episode 1
+  if (new RegExp(`\\bE(?:p(?:isode)?)?\\s*0*${n}\\b`, "i").test(t)) return true;
+
+  // Último recurso: número isolado entre separadores (mais permissivo, mas ainda seguro)
+  if (new RegExp(`(?:^|[\\s\\[\\(\\-_])0*${n}(?:v\\d+)?(?=[\\s\\]\\)\\[\\-_]|$)`).test(t)) return true;
+
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -194,7 +307,7 @@ async function resolveInfoHash(r) {
     });
     const finalUrl = res.request?.res?.responseUrl || "";
     if (finalUrl.startsWith("magnet:")) return extractInfoHash(finalUrl);
-    const buf = Buffer.from(res.data);
+    const buf     = Buffer.from(res.data);
     const bodyStr = buf.toString("utf8", 0, Math.min(buf.length, 200));
     if (bodyStr.trimStart().startsWith("magnet:")) return extractInfoHash(bodyStr.trim());
     if (buf[0] === 0x64) {
@@ -245,24 +358,20 @@ function formatStream(r, indexerName) {
   const res    = first(RESOLUTION, t);
   const qual   = first(QUALITY, t);
   const codec  = first(CODEC, t);
-  const audios = all(AUDIO, t);
-  const vis    = all(VISUAL, t);
-  const langs  = all(LANG, t);
+  const audios = matchAll(AUDIO, t);
+  const vis    = matchAll(VISUAL, t);
+  const langs  = matchAll(LANG, t);
   const group  = extractGroup(t);
   const size   = fmtBytes(r.Size);
   const seeds  = r.Seeders || 0;
 
-  const nameLine1 = `🔍 ProwJack · ${indexerName}`;
-  const nameLine2 = [
-    res  ? res.emoji : "❔",
-    qual ? `${qual.emoji} ${qual.label}` : "",
-    vis.length ? vis.map(v => v.label).join(" | ") : "",
-  ].filter(Boolean).join("  ");
-  const nameLine3 = [
-    langs.length ? langs.map(l => l.emoji).join(" ") : "🌐",
-    codec ? `🎞️ ${codec.label}` : "",
-    seeds > 0 ? `🌱 ${seeds}` : "",
-  ].filter(Boolean).join("  ");
+  const n1 = `🔍 ProwJack · ${indexerName}`;
+  const n2 = [res ? res.emoji : "❔",
+              qual ? `${qual.emoji} ${qual.label}` : "",
+              vis.length ? vis.map(v => v.label).join(" | ") : ""].filter(Boolean).join("  ");
+  const n3 = [langs.length ? langs.map(l => l.emoji).join(" ") : "🌐",
+              codec ? `🎞️ ${codec.label}` : "",
+              seeds > 0 ? `🌱 ${seeds}` : ""].filter(Boolean).join("  ");
 
   const clean = t.replace(/\b\d{4}\b\.?/g, " ").replace(/\./g, " ").replace(/\s{2,}/g, " ").trim();
   const desc = [
@@ -273,14 +382,13 @@ function formatStream(r, indexerName) {
      res ? `📐 ${res.label}` : ""].filter(Boolean).join("  "),
     [audios.length ? `🎧 ${audios.map(a => a.label).join(" | ")}` : "",
      langs.length ? `🗣️ ${langs.map(l => `${l.emoji} ${l.label}`).join(" / ")}` : ""].filter(Boolean).join("  "),
-    [size ? `📦 ${size}` : "",
-     seeds > 0 ? `🌱 ${seeds} seeds` : "",
+    [size ? `📦 ${size}` : "", seeds > 0 ? `🌱 ${seeds} seeds` : "",
      `📡 ${indexerName}`].filter(Boolean).join("  "),
     group ? `🏷️ ${group}` : "",
     ["⚠️ P2P", langs.some(l => l.code === "pt-br") ? "🇧🇷 PT-BR" : ""].filter(Boolean).join("  "),
   ].filter(Boolean).join("\n");
 
-  return { name: [nameLine1, nameLine2, nameLine3].join("\n"), description: desc };
+  return { name: [n1, n2, n3].join("\n"), description: desc };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -302,93 +410,52 @@ async function jackettFetchIndexers() {
   const timeout = 12000;
   const logs    = [];
 
-  // ── Estratégia 1: /api/v2.0/indexers sem filtro configured
-  // Mais compatível; filtra client-side depois.
-  try {
-    const res = await axios.get(`${base}/api/v2.0/indexers`, {
-      params: qp(),
-      timeout,
-      validateStatus: () => true,   // não jogar exceção em nenhum HTTP status
-    });
-    logs.push(`strategy-1: HTTP ${res.status}`);
-
-    if (res.status < 400 && Array.isArray(res.data)) {
-      const list = normalizeIndexerList(res.data);
-      if (list.length) {
-        const configured = list.filter(ix => ix.configured === true);
-        const out = configured.length ? configured : list;
-        console.log(`✅ jackettFetchIndexers [strategy-1]: ${out.length} indexers`);
-        return out;
+  const tryEndpoint = async (label, fn) => {
+    try {
+      const res = await fn();
+      logs.push(`${label}: HTTP ${res.status}`);
+      if (res.status < 400 && Array.isArray(res.data)) {
+        const list = normalizeIndexerList(res.data);
+        if (list.length) {
+          const configured = list.filter(ix => ix.configured === true);
+          return configured.length ? configured : list;
+        }
       }
-    }
-  } catch (e) { logs.push(`strategy-1 exception: ${e.message}`); }
+    } catch (e) { logs.push(`${label} ex: ${e.message}`); }
+    return null;
+  };
 
-  // ── Estratégia 2: /api/v2.0/indexers?configured=true
+  let r;
+  r = await tryEndpoint("s1:sem-configured", () =>
+    axios.get(`${base}/api/v2.0/indexers`, { params: qp(), timeout, validateStatus: () => true }));
+  if (r) { console.log(`✅ indexers [s1]: ${r.length}`); return r; }
+
+  r = await tryEndpoint("s2:configured=true", () =>
+    axios.get(`${base}/api/v2.0/indexers`, { params: qp({ configured: "true" }), timeout, validateStatus: () => true }));
+  if (r) { console.log(`✅ indexers [s2]: ${r.length}`); return r; }
+
+  // Fallback: busca em branco e extrai campo Indexers da resposta
   try {
-    const res = await axios.get(`${base}/api/v2.0/indexers`, {
-      params: qp({ configured: "true" }),
-      timeout,
-      validateStatus: () => true,
-    });
-    logs.push(`strategy-2: HTTP ${res.status}`);
-
-    if (res.status < 400 && Array.isArray(res.data)) {
-      const list = normalizeIndexerList(res.data);
-      if (list.length) {
-        console.log(`✅ jackettFetchIndexers [strategy-2]: ${list.length} indexers`);
-        return list;
-      }
-    }
-  } catch (e) { logs.push(`strategy-2 exception: ${e.message}`); }
-
-  // ── Estratégia 3 (fallback garantido): faz uma busca em branco no indexer "all"
-  // O endpoint /results SEMPRE funciona (provado pelos logs do usuário) e a resposta
-  // inclui o campo "Indexers" com todos os indexers consultados, mesmo com 0 resultados.
-  // Ref: https://github.com/Jackett/Jackett/issues/12296
-  try {
-    console.log("⚠️ jackettFetchIndexers: endpoints /indexers falharam, usando fallback via /results...");
+    console.log("⚠️ indexers: fallback via /results...");
     const res = await axios.get(`${base}/api/v2.0/indexers/all/results`, {
-      params: qp({ Query: "" }),
-      timeout: 30000,               // busca em branco pode demorar mais
-      validateStatus: () => true,
+      params: qp({ Query: "" }), timeout: 30000, validateStatus: () => true,
     });
-    logs.push(`strategy-3 (/results): HTTP ${res.status}`);
-
+    logs.push(`s3: HTTP ${res.status}`);
     if (res.status < 400) {
-      // Tenta campo "Indexers" da resposta (presente na maioria das versões do Jackett)
-      const fromIndexers = Array.isArray(res.data?.Indexers)
+      const fromIx = Array.isArray(res.data?.Indexers)
         ? res.data.Indexers
-            .map(ix => ({
-              id:   String(ix.ID   || ix.id   || "").trim(),
-              name: String(ix.Name || ix.name || ix.ID || ix.id || "").trim(),
-            }))
+            .map(ix => ({ id: String(ix.ID||ix.id||"").trim(), name: String(ix.Name||ix.name||ix.ID||ix.id||"").trim() }))
             .filter(ix => ix.id && ix.id !== "all")
         : [];
+      if (fromIx.length) { console.log(`✅ indexers [s3/Indexers]: ${fromIx.length}`); return fromIx; }
 
-      if (fromIndexers.length) {
-        console.log(`✅ jackettFetchIndexers [strategy-3/Indexers field]: ${fromIndexers.length} indexers`);
-        return fromIndexers;
-      }
-
-      // Fallback dentro do fallback: extrai TrackerIds únicos dos resultados da busca
-      const results = res.data?.Results || [];
-      const fromResults = uniq(
-        results.map(r => r.TrackerId || r.Tracker).filter(Boolean)
-      ).map(id => ({ id, name: id }));
-
-      if (fromResults.length) {
-        console.log(`✅ jackettFetchIndexers [strategy-3/Results trackers]: ${fromResults.length} indexers`);
-        return fromResults;
-      }
+      const fromRes = uniq((res.data?.Results||[]).map(r2 => r2.TrackerId||r2.Tracker).filter(Boolean))
+        .map(id => ({ id, name: id }));
+      if (fromRes.length) { console.log(`✅ indexers [s3/trackers]: ${fromRes.length}`); return fromRes; }
     }
-  } catch (e) { logs.push(`strategy-3 exception: ${e.message}`); }
+  } catch (e) { logs.push(`s3 ex: ${e.message}`); }
 
-  // Todas falharam — loga tudo para diagnóstico
-  console.error(`❌ jackettFetchIndexers falhou. Histórico:\n  ${logs.join("\n  ")}`);
-  throw new Error(
-    `Não foi possível listar indexers do Jackett.\n` +
-    `Diagnóstico:\n${logs.map(l => "  • " + l).join("\n")}`
-  );
+  throw new Error(`Jackett inacessível:\n${logs.map(l => "  • " + l).join("\n")}`);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -398,9 +465,7 @@ async function trackMetrics(indexer, ms, count, ok) {
   const key = `metrics:${indexer}`;
   const raw = await rc.get(key);
   const m = raw ? JSON.parse(raw) : { calls: 0, totalMs: 0, totalResults: 0, failures: 0 };
-  m.calls++;
-  m.totalMs += ms;
-  m.totalResults += count;
+  m.calls++; m.totalMs += ms; m.totalResults += count;
   if (!ok) m.failures++;
   m.avgMs       = Math.round(m.totalMs / m.calls);
   m.avgResults  = Math.round(m.totalResults / m.calls);
@@ -409,33 +474,22 @@ async function trackMetrics(indexer, ms, count, ok) {
   await rc.set(key, JSON.stringify(m), 86400);
 }
 
-function selectedIndexers(prefs) {
-  const list = Array.isArray(prefs.indexers) ? prefs.indexers.filter(Boolean) : [];
-  return (!list.length || list.includes("all")) ? ["all"] : list;
-}
-
 function dedupeResults(results) {
   const seen = new Set();
   return results.filter(r => {
-    const key = [r.InfoHash || "", r.Guid || "", r.Link || "",
-                 r.MagnetUri || "", r.Title || "", r.Size || "",
-                 r.Tracker || r.TrackerId || ""].join("|");
+    const key = [r.InfoHash||"", r.Guid||"", r.Link||"", r.MagnetUri||"",
+                 r.Title||"", r.Size||"", r.Tracker||r.TrackerId||""].join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-async function jackettSearch(queries, prefs) {
+async function jackettSearch(queries, indexers, prefs) {
   const queryList = uniq(Array.isArray(queries) ? queries : [queries]);
-  const indexers  = selectedIndexers(prefs);
   const cacheKey  = `search:${queryList.join("||")}:${indexers.join(",")}`;
   const cached    = await rc.get(cacheKey);
-
-  if (cached) {
-    console.log(`⚡ Cache HIT: ${queryList.join(" | ")}`);
-    return JSON.parse(cached);
-  }
+  if (cached) { console.log(`⚡ Cache HIT`); return JSON.parse(cached); }
 
   const threshold = prefs.slowThreshold || 8000;
   const tasks = [];
@@ -444,21 +498,37 @@ async function jackettSearch(queries, prefs) {
     console.log(`🌐 Jackett: "${query}" [${indexers.join(", ")}]`);
     for (const indexer of indexers) {
       tasks.push((async () => {
+        if (await isRateLimited(indexer)) {
+          console.log(`  ⏭️ ${indexer}: rate limit ativo`);
+          return [];
+        }
         const t0 = Date.now();
         try {
           const res = await axios.get(
             `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results`,
-            { params: qp({ Query: query }), timeout: threshold }
+            { params: qp({ Query: query }), timeout: threshold, validateStatus: () => true }
           );
           const ms = Date.now() - t0;
-          const results = res.data.Results || [];
+          if (res.status === 429) {
+            await setRateLimit(indexer, res.headers?.["retry-after"]);
+            await trackMetrics(indexer, ms, 0, false);
+            return [];
+          }
+          if (res.status >= 400) {
+            console.log(`  ❌ ${indexer}: HTTP ${res.status} (${ms}ms)`);
+            await trackMetrics(indexer, ms, 0, false);
+            return [];
+          }
+          const results = res.data?.Results || [];
           await trackMetrics(indexer, ms, results.length, true);
           console.log(`  ✅ ${indexer}: ${results.length} (${ms}ms)`);
           return results;
         } catch (err) {
           const ms = Date.now() - t0;
+          if (err.response?.status === 429)
+            await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
           await trackMetrics(indexer, ms, 0, false);
-          console.log(`  ❌ ${indexer}: ${err.response?.status || ""} ${err.message}`);
+          console.log(`  ❌ ${indexer}: ${err.message}`);
           return [];
         }
       })());
@@ -466,7 +536,7 @@ async function jackettSearch(queries, prefs) {
   }
 
   const allResults = dedupeResults((await Promise.all(tasks)).flat());
-  console.log(`📦 Total deduplicado: ${allResults.length}`);
+  console.log(`📦 Total: ${allResults.length}`);
   if (allResults.length > 0) await rc.set(cacheKey, JSON.stringify(allResults), 600);
   return allResults;
 }
@@ -486,9 +556,7 @@ async function getCinemetaTitle(type, imdbId) {
       aliases: uniq([meta?.name, meta?.originalName,
                      ...(Array.isArray(meta?.aliases) ? meta.aliases : [])]).map(normTitle),
     };
-  } catch {
-    return { title: imdbId, aliases: [normTitle(imdbId)] };
-  }
+  } catch { return { title: imdbId, aliases: [normTitle(imdbId)] }; }
 }
 
 async function getKitsuMeta(kitsuId) {
@@ -498,10 +566,13 @@ async function getKitsuMeta(kitsuId) {
       { timeout: 5000, headers: { Accept: "application/vnd.api+json" } }
     );
     const attrs = res.data?.data?.attributes || {};
+    // Prioridade: japonês romaji → canônico → inglês (melhor cobertura no Nyaa)
     const aliases = uniq([
+      attrs.titles?.ja_jp,
+      attrs.titles?.en_jp,
       attrs.canonicalTitle,
-      attrs.titles?.en, attrs.titles?.en_jp,
-      attrs.titles?.ja_jp, attrs.titles?.en_us,
+      attrs.titles?.en,
+      attrs.titles?.en_us,
       ...(Array.isArray(attrs.abbreviatedTitles) ? attrs.abbreviatedTitles : []),
       attrs.slug ? attrs.slug.replace(/-/g, " ") : null,
     ]).map(normTitle);
@@ -513,7 +584,7 @@ async function getKitsuMeta(kitsuId) {
 }
 
 // ─────────────────────────────────────────────────────────
-// STREAM ID PARSE
+// STREAM ID PARSE + BUILD QUERIES
 // ─────────────────────────────────────────────────────────
 function parseStreamId(type, id) {
   if (id.startsWith("kitsu:")) {
@@ -537,25 +608,34 @@ async function buildQueries(type, id) {
   if (parsed.isAnime) {
     const meta = await getKitsuMeta(parsed.kitsuId);
     const ep   = parsed.episode;
+
+    // Queries em ordem de especificidade: formatos mais comuns do Nyaa primeiro
+    // NÃO inclui query sem episódio para evitar resultados de temporadas inteiras
     const queries = ep != null
       ? uniq(meta.aliases.flatMap(title => [
-          `${title} ${ep}`,
-          `${title} ${String(ep).padStart(2, "0")}`,
-          `${title} - ${ep}`,
-          `${title} - ${String(ep).padStart(2, "0")}`,
+          `${title} - ${String(ep).padStart(2,"0")}`,   // "Título - 01"
+          `${title} - ${ep}`,                            // "Título - 1"
+          `${title} ${String(ep).padStart(2,"0")}`,      // "Título 01"
+          `${title} ${ep}`,                              // "Título 1"
           `${title} Episode ${ep}`,
         ]))
       : uniq(meta.aliases);
+
     console.log(`🌸 Kitsu ${parsed.kitsuId} ep${ep} → "${meta.title}" (${meta.aliases.length} aliases)`);
-    return { parsed, displayTitle: meta.title, queries };
+    return { parsed, displayTitle: meta.title, queries, episode: ep };
   }
 
   const meta  = await getCinemetaTitle(type, parsed.metaId);
   let queries = [meta.title];
   if (type === "series" && parsed.season != null && parsed.episode != null) {
-    queries = [`${meta.title} S${String(parsed.season).padStart(2,"0")}E${String(parsed.episode).padStart(2,"0")}`];
+    queries = uniq([
+      `${meta.title} S${String(parsed.season).padStart(2,"0")}E${String(parsed.episode).padStart(2,"0")}`,
+      ...meta.aliases.slice(0, 2).map(a =>
+        `${a} S${String(parsed.season).padStart(2,"0")}E${String(parsed.episode).padStart(2,"0")}`
+      ),
+    ]);
   }
-  return { parsed, displayTitle: meta.title, queries: uniq(queries.map(normTitle)) };
+  return { parsed, displayTitle: meta.title, queries: uniq(queries.map(normTitle)), episode: null };
 }
 
 // ─────────────────────────────────────────────────────────
@@ -565,41 +645,28 @@ app.get("/api/env", (_, res) => {
   res.json({ jackettUrl: ENV.jackettUrl, apiKeySet: !!ENV.apiKey,
              port: ENV.port, redisUrl: ENV.redisUrl });
 });
-
 app.get("/api/indexers", async (_, res) => {
   try {
     const indexers = await jackettFetchIndexers();
-    if (!indexers.length) {
-      return res.json({ ok: false,
-        error: "Nenhum indexer encontrado. Configure pelo menos um indexer no Jackett.",
-        indexers: [] });
-    }
+    if (!indexers.length)
+      return res.json({ ok: false, error: "Nenhum indexer encontrado.", indexers: [] });
     res.json({ ok: true, count: indexers.length, indexers });
   } catch (err) {
-    console.error(`❌ /api/indexers: ${err.message}`);
     res.json({ ok: false, error: err.message, indexers: [] });
   }
 });
-
 app.get("/api/test", async (_, res) => {
   try {
     const indexers = await jackettFetchIndexers();
     res.json({ ok: true, count: indexers.length, indexers });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
+  } catch (err) { res.json({ ok: false, error: err.message }); }
 });
-
 app.get("/api/metrics", async (_, res) => {
   const keys = await rc.keys("metrics:*");
   const out  = {};
-  for (const k of keys) {
-    const raw = await rc.get(k);
-    if (raw) out[k.replace("metrics:", "")] = JSON.parse(raw);
-  }
+  for (const k of keys) { const raw = await rc.get(k); if (raw) out[k.replace("metrics:","")] = JSON.parse(raw); }
   res.json(out);
 });
-
 app.delete("/api/metrics/:indexer", async (req, res) => {
   await rc.del(`metrics:${req.params.indexer}`);
   res.json({ ok: true });
@@ -610,34 +677,28 @@ app.delete("/api/metrics/:indexer", async (req, res) => {
 // ─────────────────────────────────────────────────────────
 app.get("/manifest.json", (_, res) => {
   res.json({
-    id: "org.prowjack.pro", version: "3.2.0", name: "ProwJack PRO",
-    description: "Busca no Jackett com ranking PT-BR e suporte a anime via Kitsu.",
+    id: "org.prowjack.pro", version: "3.3.1", name: "ProwJack PRO",
+    description: "Jackett · Ranking PT-BR · Anime via Kitsu · Rate-limit guard.",
     resources: ["stream"], types: ["movie", "series"],
     idPrefixes: ["tt", "kitsu:"], catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: true, p2p: true },
   });
 });
-
 app.get("/configure", (_, res) =>
-  res.sendFile(path.join(__dirname, "public", "configure.html"))
-);
+  res.sendFile(path.join(__dirname, "public", "configure.html")));
 app.get("/", (_, res) => res.redirect("/configure"));
 
 app.get("/:userConfig/manifest.json", (req, res) => {
-  const prefs = resolvePrefs(req.params.userConfig);
-  const types = [...new Set(
-    (prefs.categories || ["movie", "series"]).map(c =>
-      c === "movies" ? "movie" : c === "anime" ? "series" : c
-    )
+  const prefs   = resolvePrefs(req.params.userConfig);
+  const types   = [...new Set(
+    (prefs.categories||["movie","series"]).map(c =>
+      c==="movies"?"movie":c==="anime"?"series":c)
   )];
-  const ixLabel = (prefs.indexers || []).includes("all")
-    ? "todos os indexers"
-    : (prefs.indexers || []).join(", ");
+  const ixLabel = (prefs.indexers||[]).includes("all") ? "todos" : (prefs.indexers||[]).join(", ");
   res.json({
-    id: "org.prowjack.pro", version: "3.2.0", name: "ProwJack PRO",
-    description: `Jackett (${ixLabel}) · Ranking PT-BR · Anime via Kitsu`,
-    resources: ["stream"], types,
-    idPrefixes: ["tt", "kitsu:"], catalogs: [],
+    id: "org.prowjack.pro", version: "3.3.1", name: "ProwJack PRO",
+    description: `Jackett (${ixLabel}) · PT-BR · Anime via Kitsu`,
+    resources: ["stream"], types, idPrefixes: ["tt","kitsu:"], catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: false, p2p: true },
   });
 });
@@ -652,16 +713,25 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
 
   try {
-    const { parsed, displayTitle, queries } = await buildQueries(type, id);
-    console.log(`🎬 ${type} ${id} [${parsed.source}] → queries: ${JSON.stringify(queries)}`);
+    const { parsed, displayTitle, queries, episode } = await buildQueries(type, id);
 
-    const results = await jackettSearch(queries, prefs);
+    // Roteamento: resolve indexers corretos para o tipo de conteúdo
+    const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
+
+    console.log(`🎬 ${type} ${id} [${parsed.source}] indexers:[${indexers.join(",")}]`);
+    console.log(`   queries: ${JSON.stringify(queries)}`);
+
+    const results = await jackettSearch(queries, indexers, prefs);
 
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
       .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))
+      // Filtro de episódio para anime — evita eps errados vindos do Nyaa
+      .filter(r => !parsed.isAnime || episode == null || animeEpisodeMatches(r.Title || "", episode))
       .sort((a, b) => score(b, prefs.weights) - score(a, prefs.weights))
       .slice(0, prefs.maxResults || 20);
+
+    console.log(`🔎 ${results.length} resultados → ${candidates.length} após filtros`);
 
     const resolved = await Promise.all(
       candidates.map(async r => {
@@ -694,8 +764,8 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 // START
 // ─────────────────────────────────────────────────────────
 app.listen(ENV.port, () => {
-  console.log(`🚀 ProwJack PRO → http://localhost:${ENV.port}/configure`);
+  console.log(`🚀 ProwJack PRO v3.3.1 → http://localhost:${ENV.port}/configure`);
   console.log(`   Jackett : ${ENV.jackettUrl}`);
-  console.log(`   ApiKey  : ${ENV.apiKey ? "✔ definida" : "✗ não definida"}`);
+  console.log(`   ApiKey  : ${ENV.apiKey ? "✔" : "✗ não definida"}`);
   console.log(`   Redis   : ${ENV.redisUrl}`);
 });
