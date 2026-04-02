@@ -10,11 +10,8 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ─────────────────────────────────────────────────────────
-// CORS — obrigatório para o Stremio aceitar o addon
-// ─────────────────────────────────────────────────────────
 app.use((_, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin",  "*");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   next();
@@ -22,14 +19,13 @@ app.use((_, res, next) => {
 app.options("*", (_, res) => res.sendStatus(200));
 
 // ─────────────────────────────────────────────────────────
-// CONFIGURAÇÃO VIA ENV (Docker)
+// ENV
 // ─────────────────────────────────────────────────────────
 const ENV = {
-  jackettUrl: (process.env.JACKETT_URL     || "http://localhost:9117").replace(/\/$/, ""),
-  apiKey:      process.env.JACKETT_API_KEY  || "",
-  indexers:   (process.env.INDEXERS || "all").split(",").map(s => s.trim()).filter(Boolean),
-  port:        process.env.PORT || 7014,
-  redisUrl:    process.env.REDIS_URL || "redis://localhost:6379",
+  jackettUrl: (process.env.JACKETT_URL || "http://localhost:9117").replace(/\/+$/, ""),
+  apiKey:     (process.env.JACKETT_API_KEY || "").trim(),
+  port:       process.env.PORT || 7014,
+  redisUrl:   process.env.REDIS_URL || "redis://localhost:6379",
 };
 
 // ─────────────────────────────────────────────────────────
@@ -42,26 +38,21 @@ try {
 } catch {}
 
 const rc = {
-  async get(k)          { try { return redis ? await redis.get(k) : null; } catch { return null; } },
-  async set(k, v, ttl)  { try { redis && await redis.set(k, v, "EX", ttl); } catch {} },
-  async del(k)          { try { redis && await redis.del(k); } catch {} },
-  async keys(p)         { try { return redis ? await redis.keys(p) : []; } catch { return []; } },
+  async get(k)         { try { return redis ? await redis.get(k) : null; } catch { return null; } },
+  async set(k, v, ttl) { try { redis && await redis.set(k, v, "EX", ttl); } catch {} },
+  async del(k)         { try { redis && await redis.del(k); } catch {} },
+  async keys(p)        { try { return redis ? await redis.keys(p) : []; } catch { return []; } },
 };
 
 // ─────────────────────────────────────────────────────────
-// CONFIG CODEC  (apenas preferências — sem credenciais)
+// CONFIG
 // ─────────────────────────────────────────────────────────
-function encodeUserCfg(obj) {
-  return Buffer.from(JSON.stringify(obj)).toString("base64url");
-}
 function decodeUserCfg(str) {
   try { return JSON.parse(Buffer.from(str, "base64url").toString()); } catch { return null; }
 }
-
-// Config base quando não há nada codificado na URL
 function defaultPrefs() {
   return {
-    indexers:        ENV.indexers,
+    indexers:        ["all"],
     categories:      ["movie", "series"],
     weights:         { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5 },
     maxResults:      20,
@@ -69,22 +60,10 @@ function defaultPrefs() {
     skipBadReleases: true,
   };
 }
-
 function resolvePrefs(encoded) {
   const userPrefs = encoded ? (decodeUserCfg(encoded) || {}) : {};
   const merged = { ...defaultPrefs(), ...userPrefs };
-
-  const envIsAll  = ENV.indexers.length === 1 && ENV.indexers[0] === "all";
-  const userIsAll = !merged.indexers?.length || merged.indexers.includes("all");
-
-  if (!envIsAll && userIsAll) {
-    merged.indexers = ENV.indexers;
-  } else if (!envIsAll && !userIsAll) {
-    const envSet = new Set(ENV.indexers);
-    merged.indexers = merged.indexers.filter(ix => envSet.has(ix));
-    if (!merged.indexers.length) merged.indexers = ENV.indexers;
-  }
-
+  if (!Array.isArray(merged.indexers) || !merged.indexers.length) merged.indexers = ["all"];
   return merged;
 }
 
@@ -92,29 +71,29 @@ function resolvePrefs(encoded) {
 // PARSERS
 // ─────────────────────────────────────────────────────────
 const RESOLUTION = [
-  { re: /\b(4k|2160p)\b/i,  label: "2160p", emoji: "🎞️ 4K",  score: 4   },
-  { re: /\b1440p\b/i,       label: "1440p", emoji: "🎞️ 2K",  score: 3.5 },
-  { re: /\b1080p\b/i,       label: "1080p", emoji: "🎞️ FHD", score: 3   },
-  { re: /\b720p\b/i,        label: "720p",  emoji: "💿 HD",   score: 2   },
-  { re: /\b576p\b/i,        label: "576p",  emoji: "📼 576P", score: 1   },
-  { re: /\b480p\b/i,        label: "480p",  emoji: "📼 480P", score: 0.5 },
+  { re: /\b(4k|2160p)\b/i, label: "2160p", emoji: "🎞️ 4K",  score: 4   },
+  { re: /\b1440p\b/i,      label: "1440p", emoji: "🎞️ 2K",  score: 3.5 },
+  { re: /\b1080p\b/i,      label: "1080p", emoji: "🎞️ FHD", score: 3   },
+  { re: /\b720p\b/i,       label: "720p",  emoji: "💿 HD",   score: 2   },
+  { re: /\b576p\b/i,       label: "576p",  emoji: "📼 576P", score: 1   },
+  { re: /\b480p\b/i,       label: "480p",  emoji: "📼 480P", score: 0.5 },
 ];
 const QUALITY = [
-  { re: /remux/i,             label: "REMUX",  emoji: "📀", score: 5  },
-  { re: /blu[-.]?ray/i,       label: "BluRay", emoji: "💿", score: 4  },
-  { re: /web[-.]?dl/i,        label: "WEBDL",  emoji: "🌐", score: 3  },
-  { re: /webrip/i,            label: "WEBRip", emoji: "🖥️", score: 2.5},
-  { re: /hdrip/i,             label: "HDRip",  emoji: "💾", score: 2  },
-  { re: /dvdrip/i,            label: "DVDRip", emoji: "💾", score: 1.5},
-  { re: /hdtv/i,              label: "HDTV",   emoji: "📺", score: 1  },
-  { re: /\b(ts|tc|hcts)\b/i,  label: "TS",     emoji: "⚠️", score: -2 },
-  { re: /\bcam(rip)?\b/i,     label: "CAM",    emoji: "⛔", score: -5 },
+  { re: /remux/i,            label: "REMUX",  emoji: "📀", score: 5   },
+  { re: /blu[-.]?ray/i,      label: "BluRay", emoji: "💿", score: 4   },
+  { re: /web[-.]?dl/i,       label: "WEBDL",  emoji: "🌐", score: 3   },
+  { re: /webrip/i,           label: "WEBRip", emoji: "🖥️", score: 2.5 },
+  { re: /hdrip/i,            label: "HDRip",  emoji: "💾", score: 2   },
+  { re: /dvdrip/i,           label: "DVDRip", emoji: "💾", score: 1.5 },
+  { re: /hdtv/i,             label: "HDTV",   emoji: "📺", score: 1   },
+  { re: /\b(ts|tc|hcts)\b/i, label: "TS",     emoji: "⚠️", score: -2  },
+  { re: /\bcam(rip)?\b/i,    label: "CAM",    emoji: "⛔", score: -5  },
 ];
 const CODEC = [
-  { re: /\bav1\b/i,           label: "AV1",   score: 4 },
-  { re: /[hx]\.?265|hevc/i,   label: "H.265", score: 3 },
-  { re: /[hx]\.?264|avc/i,    label: "H.264", score: 2 },
-  { re: /xvid|divx/i,         label: "XViD",  score: 0 },
+  { re: /\bav1\b/i,         label: "AV1",   score: 4 },
+  { re: /[hx]\.?265|hevc/i, label: "H.265", score: 3 },
+  { re: /[hx]\.?264|avc/i,  label: "H.264", score: 2 },
+  { re: /xvid|divx/i,       label: "XViD",  score: 0 },
 ];
 const AUDIO = [
   { re: /atmos/i,             label: "Atmos"  },
@@ -122,34 +101,45 @@ const AUDIO = [
   { re: /dts[-.]?hd/i,        label: "DTS-HD" },
   { re: /\bdts\b/i,           label: "DTS"    },
   { re: /truehd/i,            label: "TrueHD" },
-  { re: /dd\+|eac[-.]?3/i,   label: "DD+"    },
+  { re: /dd\+|eac[-.]?3/i,    label: "DD+"    },
   { re: /\b(dd|ac[-.]?3)\b/i, label: "DD"     },
   { re: /\baac\b/i,           label: "AAC"    },
   { re: /\bmp3\b/i,           label: "MP3"    },
   { re: /\bopus\b/i,          label: "Opus"   },
 ];
 const VISUAL = [
-  { re: /hdr10\+/i,                      label: "HDR10+" },
-  { re: /hdr10\b/i,                      label: "HDR10"  },
-  { re: /dolby.?vision|dovi|\bdv\b/i,    label: "DV"     },
-  { re: /\bhdr\b/i,                      label: "HDR"    },
-  { re: /\bsdr\b/i,                      label: "SDR"    },
+  { re: /hdr10\+/i,                   label: "HDR10+" },
+  { re: /hdr10\b/i,                   label: "HDR10"  },
+  { re: /dolby.?vision|dovi|\bdv\b/i, label: "DV"     },
+  { re: /\bhdr\b/i,                   label: "HDR"    },
+  { re: /\bsdr\b/i,                   label: "SDR"    },
 ];
 const LANG = [
   { re: /(dublado|dual.?audio|pt[-.]?br|portugu[eê]s|portuguese|brazilian)/i,
     code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
   { re: /\b(english|eng)\b/i,
-    code: "en",    emoji: "🇺🇸", label: "EN"    },
+    code: "en", emoji: "🇺🇸", label: "EN" },
   { re: /(espa[nñ]ol|spanish|\besp\b)/i,
-    code: "es",    emoji: "🇪🇸", label: "ES"    },
+    code: "es", emoji: "🇪🇸", label: "ES" },
   { re: /(fran[cç]ais|french|\bfre\b)/i,
-    code: "fr",    emoji: "🇫🇷", label: "FR"    },
+    code: "fr", emoji: "🇫🇷", label: "FR" },
 ];
 
 const first = (map, t) => map.find(e => e.re.test(t));
 const all   = (map, t) => map.filter(e => e.re.test(t));
+const uniq  = arr => [...new Set(arr.filter(Boolean))];
+const normTitle = s => (s || "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 
-// Converte base32 (32 chars A-Z2-7) → hex (40 chars)
+// Monta params sem incluir apikey vazio
+function qp(extra = {}) {
+  const p = { ...extra };
+  if (ENV.apiKey) p.apikey = ENV.apiKey;
+  return p;
+}
+
+// ─────────────────────────────────────────────────────────
+// INFOHASH
+// ─────────────────────────────────────────────────────────
 function base32ToHex(b32) {
   const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = "";
@@ -163,7 +153,6 @@ function base32ToHex(b32) {
     hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
   return hex.length === 40 ? hex : null;
 }
-
 function extractInfoHash(magnet) {
   if (!magnet) return null;
   const hex = magnet.match(/btih:([a-fA-F0-9]{40})(?:[&?]|$)/i);
@@ -174,63 +163,45 @@ function extractInfoHash(magnet) {
   if (loose) return loose[1].toLowerCase();
   return null;
 }
-
 function extractInfoBuf(buf) {
-  const s   = buf.toString("latin1");
+  const s = buf.toString("latin1");
   const pos = s.indexOf("4:info");
   if (pos === -1) return null;
-  let i     = pos + 6;
-  let depth = 0;
+  let i = pos + 6, depth = 0;
   const start = i;
   while (i < s.length) {
     const c = s[i];
     if (c === "d" || c === "l") { depth++; i++; }
-    else if (c === "e")         { depth--; i++; if (depth === 0) break; }
-    else if (c === "i")         { i = s.indexOf("e", i + 1) + 1; }
+    else if (c === "e") { depth--; i++; if (depth === 0) break; }
+    else if (c === "i") { i = s.indexOf("e", i + 1) + 1; }
     else if (c >= "0" && c <= "9") {
       const colon = s.indexOf(":", i);
       if (colon === -1) break;
       i = colon + 1 + parseInt(s.slice(i, colon), 10);
-    } else { i++; }
+    } else i++;
   }
   return depth === 0 ? buf.slice(start, i) : null;
 }
-
 async function resolveInfoHash(r) {
   if (r.InfoHash) return r.InfoHash.toLowerCase();
-
-  if (r.MagnetUri) {
-    const h = extractInfoHash(r.MagnetUri);
-    if (h) return h;
-  }
-
+  if (r.MagnetUri) { const h = extractInfoHash(r.MagnetUri); if (h) return h; }
   if (!r.Link) return null;
-
   try {
     const res = await axios.get(r.Link, {
-      timeout:            10000,
-      maxRedirects:       10,
-      responseType:       "arraybuffer",
-      maxContentLength:   8 * 1024 * 1024,
-      validateStatus:     s => s < 400,
+      timeout: 10000, maxRedirects: 10,
+      responseType: "arraybuffer", maxContentLength: 8 * 1024 * 1024,
+      validateStatus: s => s < 400,
     });
-
     const finalUrl = res.request?.res?.responseUrl || "";
     if (finalUrl.startsWith("magnet:")) return extractInfoHash(finalUrl);
-
     const buf = Buffer.from(res.data);
     const bodyStr = buf.toString("utf8", 0, Math.min(buf.length, 200));
-
     if (bodyStr.trimStart().startsWith("magnet:")) return extractInfoHash(bodyStr.trim());
-
     if (buf[0] === 0x64) {
       const infoBuf = extractInfoBuf(buf);
       if (infoBuf) return crypto.createHash("sha1").update(infoBuf).digest("hex");
     }
-  } catch (e) {
-    console.log(`  ⚠️  resolveInfoHash: ${e.message}`);
-  }
-
+  } catch (e) { console.log(`  ⚠️ resolveInfoHash: ${e.message}`); }
   return null;
 }
 
@@ -251,30 +222,23 @@ function score(r, weights = {}) {
   const w = { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5, ...weights };
   const t = r.Title || "";
   let s = 0;
-
   const lang = first(LANG, t);
   if (lang?.code === "pt-br") s += w.language * 25;
   else if (lang?.code === "en") s += w.language * 5;
-
   const res = first(RESOLUTION, t);
   if (res) s += res.score * w.resolution * 10;
-
   const qual = first(QUALITY, t);
   if (qual) s += qual.score * 50;
-
   s += (r.Seeders || 0) * (w.seeders / 10);
-
   const gb = (r.Size || 0) / 1e9;
   if (gb > 0) s += Math.max(0, 10 - Math.abs(gb - 8)) * w.size;
-
   const codec = first(CODEC, t);
   if (codec) s += codec.score * w.codec * 5;
-
   return s;
 }
 
 // ─────────────────────────────────────────────────────────
-// FORMATTER  (estilo aiostreams)
+// FORMATTER
 // ─────────────────────────────────────────────────────────
 function formatStream(r, indexerName) {
   const t      = r.Title || "";
@@ -290,7 +254,7 @@ function formatStream(r, indexerName) {
 
   const nameLine1 = `🔍 ProwJack · ${indexerName}`;
   const nameLine2 = [
-    res  ? res.emoji          : "❔",
+    res  ? res.emoji : "❔",
     qual ? `${qual.emoji} ${qual.label}` : "",
     vis.length ? vis.map(v => v.label).join(" | ") : "",
   ].filter(Boolean).join("  ");
@@ -300,202 +264,329 @@ function formatStream(r, indexerName) {
     seeds > 0 ? `🌱 ${seeds}` : "",
   ].filter(Boolean).join("  ");
 
-  const clean = t
-    .replace(/\b\d{4}\b\.?/g, " ")
-    .replace(/\./g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
+  const clean = t.replace(/\b\d{4}\b\.?/g, " ").replace(/\./g, " ").replace(/\s{2,}/g, " ").trim();
   const desc = [
     `🎬 ${clean}`,
-    [
-      qual   ? `🎥 ${qual.label}`                        : "",
-      vis.length ? `📺 ${vis.map(v => v.label).join(" | ")}` : "",
-      codec  ? `🎞️ ${codec.label}`                      : "",
-      res    ? `📐 ${res.label}`                         : "",
-    ].filter(Boolean).join("  "),
-    [
-      audios.length ? `🎧 ${audios.map(a => a.label).join(" | ")}` : "",
-      langs.length  ? `🗣️ ${langs.map(l => `${l.emoji} ${l.label}`).join(" / ")}` : "",
-    ].filter(Boolean).join("  "),
-    [
-      size      ? `📦 ${size}`        : "",
-      seeds > 0 ? `🌱 ${seeds} seeds` : "",
-      `📡 ${indexerName}`,
-    ].filter(Boolean).join("  "),
+    [qual ? `🎥 ${qual.label}` : "",
+     vis.length ? `📺 ${vis.map(v => v.label).join(" | ")}` : "",
+     codec ? `🎞️ ${codec.label}` : "",
+     res ? `📐 ${res.label}` : ""].filter(Boolean).join("  "),
+    [audios.length ? `🎧 ${audios.map(a => a.label).join(" | ")}` : "",
+     langs.length ? `🗣️ ${langs.map(l => `${l.emoji} ${l.label}`).join(" / ")}` : ""].filter(Boolean).join("  "),
+    [size ? `📦 ${size}` : "",
+     seeds > 0 ? `🌱 ${seeds} seeds` : "",
+     `📡 ${indexerName}`].filter(Boolean).join("  "),
     group ? `🏷️ ${group}` : "",
-    [
-      "⚠️ P2P",
-      langs.some(l => l.code === "pt-br") ? "🇧🇷 PT-BR" : "",
-    ].filter(Boolean).join("  "),
+    ["⚠️ P2P", langs.some(l => l.code === "pt-br") ? "🇧🇷 PT-BR" : ""].filter(Boolean).join("  "),
   ].filter(Boolean).join("\n");
 
-  return {
-    name:        [nameLine1, nameLine2, nameLine3].join("\n"),
-    description: desc,
-  };
+  return { name: [nameLine1, nameLine2, nameLine3].join("\n"), description: desc };
 }
 
 // ─────────────────────────────────────────────────────────
-// JACKETT  (credenciais sempre da ENV)
+// JACKETT — listar indexers
 // ─────────────────────────────────────────────────────────
+function normalizeIndexerList(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [];
+  return raw
+    .map(ix => ({
+      id:         String(ix.ID   || ix.id   || ix.Name || ix.name || "").trim(),
+      name:       String(ix.Name || ix.name || ix.ID   || ix.id   || "").trim(),
+      configured: ix.configured ?? ix.Configured ?? true,
+    }))
+    .filter(ix => ix.id && ix.name && ix.id !== "all");
+}
+
 async function jackettFetchIndexers() {
-  const strategies = [
-    () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
-            { params: { apikey: ENV.apiKey }, timeout: 8000 }),
-    () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
-            { params: { apikey: ENV.apiKey, configured: "true" }, timeout: 8000 }),
-    () => axios.get(`${ENV.jackettUrl}/api/v2.0/indexers`,
-            { headers: { "X-Api-Key": ENV.apiKey }, timeout: 8000 }),
-  ];
+  const base    = ENV.jackettUrl;
+  const timeout = 12000;
+  const logs    = [];
 
-  for (const attempt of strategies) {
-    try {
-      const res  = await attempt();
-      const list = (res.data || []).filter(ix => ix.configured !== false);
-      if (list.length) return list;
-    } catch {}
-  }
+  // ── Estratégia 1: /api/v2.0/indexers sem filtro configured
+  // Mais compatível; filtra client-side depois.
+  try {
+    const res = await axios.get(`${base}/api/v2.0/indexers`, {
+      params: qp(),
+      timeout,
+      validateStatus: () => true,   // não jogar exceção em nenhum HTTP status
+    });
+    logs.push(`strategy-1: HTTP ${res.status}`);
 
-  console.warn("⚠️  Não foi possível listar indexers do Jackett — usando lista da ENV");
-  return ENV.indexers.map(id => ({ id, name: id, configured: true }));
+    if (res.status < 400 && Array.isArray(res.data)) {
+      const list = normalizeIndexerList(res.data);
+      if (list.length) {
+        const configured = list.filter(ix => ix.configured === true);
+        const out = configured.length ? configured : list;
+        console.log(`✅ jackettFetchIndexers [strategy-1]: ${out.length} indexers`);
+        return out;
+      }
+    }
+  } catch (e) { logs.push(`strategy-1 exception: ${e.message}`); }
+
+  // ── Estratégia 2: /api/v2.0/indexers?configured=true
+  try {
+    const res = await axios.get(`${base}/api/v2.0/indexers`, {
+      params: qp({ configured: "true" }),
+      timeout,
+      validateStatus: () => true,
+    });
+    logs.push(`strategy-2: HTTP ${res.status}`);
+
+    if (res.status < 400 && Array.isArray(res.data)) {
+      const list = normalizeIndexerList(res.data);
+      if (list.length) {
+        console.log(`✅ jackettFetchIndexers [strategy-2]: ${list.length} indexers`);
+        return list;
+      }
+    }
+  } catch (e) { logs.push(`strategy-2 exception: ${e.message}`); }
+
+  // ── Estratégia 3 (fallback garantido): faz uma busca em branco no indexer "all"
+  // O endpoint /results SEMPRE funciona (provado pelos logs do usuário) e a resposta
+  // inclui o campo "Indexers" com todos os indexers consultados, mesmo com 0 resultados.
+  // Ref: https://github.com/Jackett/Jackett/issues/12296
+  try {
+    console.log("⚠️ jackettFetchIndexers: endpoints /indexers falharam, usando fallback via /results...");
+    const res = await axios.get(`${base}/api/v2.0/indexers/all/results`, {
+      params: qp({ Query: "" }),
+      timeout: 30000,               // busca em branco pode demorar mais
+      validateStatus: () => true,
+    });
+    logs.push(`strategy-3 (/results): HTTP ${res.status}`);
+
+    if (res.status < 400) {
+      // Tenta campo "Indexers" da resposta (presente na maioria das versões do Jackett)
+      const fromIndexers = Array.isArray(res.data?.Indexers)
+        ? res.data.Indexers
+            .map(ix => ({
+              id:   String(ix.ID   || ix.id   || "").trim(),
+              name: String(ix.Name || ix.name || ix.ID || ix.id || "").trim(),
+            }))
+            .filter(ix => ix.id && ix.id !== "all")
+        : [];
+
+      if (fromIndexers.length) {
+        console.log(`✅ jackettFetchIndexers [strategy-3/Indexers field]: ${fromIndexers.length} indexers`);
+        return fromIndexers;
+      }
+
+      // Fallback dentro do fallback: extrai TrackerIds únicos dos resultados da busca
+      const results = res.data?.Results || [];
+      const fromResults = uniq(
+        results.map(r => r.TrackerId || r.Tracker).filter(Boolean)
+      ).map(id => ({ id, name: id }));
+
+      if (fromResults.length) {
+        console.log(`✅ jackettFetchIndexers [strategy-3/Results trackers]: ${fromResults.length} indexers`);
+        return fromResults;
+      }
+    }
+  } catch (e) { logs.push(`strategy-3 exception: ${e.message}`); }
+
+  // Todas falharam — loga tudo para diagnóstico
+  console.error(`❌ jackettFetchIndexers falhou. Histórico:\n  ${logs.join("\n  ")}`);
+  throw new Error(
+    `Não foi possível listar indexers do Jackett.\n` +
+    `Diagnóstico:\n${logs.map(l => "  • " + l).join("\n")}`
+  );
 }
 
+// ─────────────────────────────────────────────────────────
+// JACKETT — busca
+// ─────────────────────────────────────────────────────────
 async function trackMetrics(indexer, ms, count, ok) {
   const key = `metrics:${indexer}`;
   const raw = await rc.get(key);
-  const m = raw ? JSON.parse(raw) :
-    { calls: 0, totalMs: 0, totalResults: 0, failures: 0 };
+  const m = raw ? JSON.parse(raw) : { calls: 0, totalMs: 0, totalResults: 0, failures: 0 };
   m.calls++;
-  m.totalMs      += ms;
+  m.totalMs += ms;
   m.totalResults += count;
   if (!ok) m.failures++;
-  m.avgMs      = Math.round(m.totalMs / m.calls);
-  m.avgResults = Math.round(m.totalResults / m.calls);
+  m.avgMs       = Math.round(m.totalMs / m.calls);
+  m.avgResults  = Math.round(m.totalResults / m.calls);
   m.successRate = Math.round(((m.calls - m.failures) / m.calls) * 100);
   m.lastCall    = new Date().toISOString();
   await rc.set(key, JSON.stringify(m), 86400);
 }
 
-async function jackettSearch(query, prefs) {
-  const indexers  = (ENV.indexers.length === 1 && ENV.indexers[0] === "all")
-    ? ["all"]
-    : ENV.indexers;
+function selectedIndexers(prefs) {
+  const list = Array.isArray(prefs.indexers) ? prefs.indexers.filter(Boolean) : [];
+  return (!list.length || list.includes("all")) ? ["all"] : list;
+}
 
-  const cacheKey = `search:${query}:${indexers.join(",")}`;
-  const cached   = await rc.get(cacheKey);
+function dedupeResults(results) {
+  const seen = new Set();
+  return results.filter(r => {
+    const key = [r.InfoHash || "", r.Guid || "", r.Link || "",
+                 r.MagnetUri || "", r.Title || "", r.Size || "",
+                 r.Tracker || r.TrackerId || ""].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function jackettSearch(queries, prefs) {
+  const queryList = uniq(Array.isArray(queries) ? queries : [queries]);
+  const indexers  = selectedIndexers(prefs);
+  const cacheKey  = `search:${queryList.join("||")}:${indexers.join(",")}`;
+  const cached    = await rc.get(cacheKey);
+
   if (cached) {
-    console.log(`⚡ Cache HIT: ${query}`);
+    console.log(`⚡ Cache HIT: ${queryList.join(" | ")}`);
     return JSON.parse(cached);
   }
 
   const threshold = prefs.slowThreshold || 8000;
+  const tasks = [];
 
-  console.log(`🌐 Jackett search: "${query}" [${indexers.join(", ")}]`);
-
-  const requests = indexers.map(async indexer => {
-    const t0  = Date.now();
-    try {
-      const res = await axios.get(
-        `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results`,
-        { params: { apikey: ENV.apiKey, Query: query }, timeout: threshold }
-      );
-      const ms      = Date.now() - t0;
-      const results = res.data.Results || [];
-      await trackMetrics(indexer, ms, results.length, true);
-      console.log(`  ✅ ${indexer}: ${results.length} (${ms}ms)`);
-      return results;
-    } catch (err) {
-      const ms = Date.now() - t0;
-      await trackMetrics(indexer, ms, 0, false);
-      console.log(`  ❌ ${indexer}: ${err.response?.status || ""} ${err.message}`);
-      return [];
+  for (const query of queryList) {
+    console.log(`🌐 Jackett: "${query}" [${indexers.join(", ")}]`);
+    for (const indexer of indexers) {
+      tasks.push((async () => {
+        const t0 = Date.now();
+        try {
+          const res = await axios.get(
+            `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results`,
+            { params: qp({ Query: query }), timeout: threshold }
+          );
+          const ms = Date.now() - t0;
+          const results = res.data.Results || [];
+          await trackMetrics(indexer, ms, results.length, true);
+          console.log(`  ✅ ${indexer}: ${results.length} (${ms}ms)`);
+          return results;
+        } catch (err) {
+          const ms = Date.now() - t0;
+          await trackMetrics(indexer, ms, 0, false);
+          console.log(`  ❌ ${indexer}: ${err.response?.status || ""} ${err.message}`);
+          return [];
+        }
+      })());
     }
-  });
-
-  const all = (await Promise.all(requests)).flat();
-  console.log(`📦 Total: ${all.length}`);
-  if (all.length > 0) {
-    await rc.set(cacheKey, JSON.stringify(all), 600);
   }
-  return all;
+
+  const allResults = dedupeResults((await Promise.all(tasks)).flat());
+  console.log(`📦 Total deduplicado: ${allResults.length}`);
+  if (allResults.length > 0) await rc.set(cacheKey, JSON.stringify(allResults), 600);
+  return allResults;
 }
 
 // ─────────────────────────────────────────────────────────
-// METADATA  (Cinemeta para filmes/séries, Kitsu para anime)
+// METADATA
 // ─────────────────────────────────────────────────────────
+async function getCinemetaTitle(type, imdbId) {
+  try {
+    const res = await axios.get(
+      `https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`,
+      { timeout: 5000 }
+    );
+    const meta = res.data?.meta;
+    return {
+      title:   meta?.name || meta?.originalName || imdbId,
+      aliases: uniq([meta?.name, meta?.originalName,
+                     ...(Array.isArray(meta?.aliases) ? meta.aliases : [])]).map(normTitle),
+    };
+  } catch {
+    return { title: imdbId, aliases: [normTitle(imdbId)] };
+  }
+}
 
-// Busca título no Kitsu pelo ID numérico
-async function getKitsuTitle(kitsuId) {
+async function getKitsuMeta(kitsuId) {
   try {
     const res = await axios.get(
       `https://kitsu.io/api/edge/anime/${kitsuId}`,
       { timeout: 5000, headers: { Accept: "application/vnd.api+json" } }
     );
-    const attrs = res.data?.data?.attributes;
-    // Preferência: título em inglês → título canônico → slug
-    return attrs?.titles?.en
-        || attrs?.titles?.en_jp
-        || attrs?.canonicalTitle
-        || attrs?.slug
-        || kitsuId;
+    const attrs = res.data?.data?.attributes || {};
+    const aliases = uniq([
+      attrs.canonicalTitle,
+      attrs.titles?.en, attrs.titles?.en_jp,
+      attrs.titles?.ja_jp, attrs.titles?.en_us,
+      ...(Array.isArray(attrs.abbreviatedTitles) ? attrs.abbreviatedTitles : []),
+      attrs.slug ? attrs.slug.replace(/-/g, " ") : null,
+    ]).map(normTitle);
+    return { title: aliases[0] || String(kitsuId), aliases };
   } catch (e) {
-    console.log(`  ⚠️  getKitsuTitle(${kitsuId}): ${e.message}`);
-    return kitsuId;
-  }
-}
-
-// Retorna { title, isAnime }
-async function getTitle(type, rawId) {
-  // ID do Kitsu: "kitsu:12345"
-  if (rawId.startsWith("kitsu:")) {
-    const kitsuId = rawId.replace("kitsu:", "");
-    const title   = await getKitsuTitle(kitsuId);
-    return { title, isAnime: true };
-  }
-
-  // ID IMDB padrão
-  try {
-    const res  = await axios.get(
-      `https://v3-cinemeta.strem.io/meta/${type}/${rawId}.json`,
-      { timeout: 5000 }
-    );
-    const meta = res.data?.meta;
-    const title = meta?.name || meta?.originalName || rawId;
-    return { title, isAnime: false };
-  } catch {
-    return { title: rawId, isAnime: false };
+    console.log(`  ⚠️ getKitsuMeta(${kitsuId}): ${e.message}`);
+    return { title: String(kitsuId), aliases: [String(kitsuId)] };
   }
 }
 
 // ─────────────────────────────────────────────────────────
-// ROTAS DE API
+// STREAM ID PARSE
 // ─────────────────────────────────────────────────────────
+function parseStreamId(type, id) {
+  if (id.startsWith("kitsu:")) {
+    const parts   = id.split(":");
+    const kitsuId = parts[1] || "";
+    const episode = parts[2] != null ? parseInt(parts[2], 10) : null;
+    return { source: "kitsu", isAnime: true, kitsuId,
+             episode: Number.isFinite(episode) ? episode : null, type };
+  }
+  if (type === "series" && id.includes(":")) {
+    const [metaId, s, e] = id.split(":");
+    return { source: "imdb", isAnime: false, metaId,
+             season: parseInt(s, 10), episode: parseInt(e, 10), type };
+  }
+  return { source: "imdb", isAnime: false, metaId: id, season: null, episode: null, type };
+}
 
+async function buildQueries(type, id) {
+  const parsed = parseStreamId(type, id);
+
+  if (parsed.isAnime) {
+    const meta = await getKitsuMeta(parsed.kitsuId);
+    const ep   = parsed.episode;
+    const queries = ep != null
+      ? uniq(meta.aliases.flatMap(title => [
+          `${title} ${ep}`,
+          `${title} ${String(ep).padStart(2, "0")}`,
+          `${title} - ${ep}`,
+          `${title} - ${String(ep).padStart(2, "0")}`,
+          `${title} Episode ${ep}`,
+        ]))
+      : uniq(meta.aliases);
+    console.log(`🌸 Kitsu ${parsed.kitsuId} ep${ep} → "${meta.title}" (${meta.aliases.length} aliases)`);
+    return { parsed, displayTitle: meta.title, queries };
+  }
+
+  const meta  = await getCinemetaTitle(type, parsed.metaId);
+  let queries = [meta.title];
+  if (type === "series" && parsed.season != null && parsed.episode != null) {
+    queries = [`${meta.title} S${String(parsed.season).padStart(2,"0")}E${String(parsed.episode).padStart(2,"0")}`];
+  }
+  return { parsed, displayTitle: meta.title, queries: uniq(queries.map(normTitle)) };
+}
+
+// ─────────────────────────────────────────────────────────
+// API
+// ─────────────────────────────────────────────────────────
 app.get("/api/env", (_, res) => {
-  res.json({
-    jackettUrl: ENV.jackettUrl,
-    apiKeySet:  !!ENV.apiKey,
-    indexers:   ENV.indexers,
-  });
+  res.json({ jackettUrl: ENV.jackettUrl, apiKeySet: !!ENV.apiKey,
+             port: ENV.port, redisUrl: ENV.redisUrl });
+});
+
+app.get("/api/indexers", async (_, res) => {
+  try {
+    const indexers = await jackettFetchIndexers();
+    if (!indexers.length) {
+      return res.json({ ok: false,
+        error: "Nenhum indexer encontrado. Configure pelo menos um indexer no Jackett.",
+        indexers: [] });
+    }
+    res.json({ ok: true, count: indexers.length, indexers });
+  } catch (err) {
+    console.error(`❌ /api/indexers: ${err.message}`);
+    res.json({ ok: false, error: err.message, indexers: [] });
+  }
 });
 
 app.get("/api/test", async (_, res) => {
   try {
     const indexers = await jackettFetchIndexers();
-    res.json({
-      ok: true,
-      count: indexers.length,
-      indexers,
-      note: indexers[0]?._synthetic
-        ? "Lista da ENV (endpoint /indexers indisponível nesta versão do Jackett)"
-        : null,
-    });
+    res.json({ ok: true, count: indexers.length, indexers });
   } catch (err) {
-    res.json({
-      ok: false,
-      error: `${err.response?.status || ""} ${err.message}`.trim(),
-    });
+    res.json({ ok: false, error: err.message });
   }
 });
 
@@ -515,68 +606,39 @@ app.delete("/api/metrics/:indexer", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// MANIFEST BASE  (sem config — mostra botão "Configurar")
+// MANIFESTS
 // ─────────────────────────────────────────────────────────
 app.get("/manifest.json", (_, res) => {
   res.json({
-    id:          "org.prowjack.pro",
-    version:     "3.1.0",
-    name:        "ProwJack PRO",
-    description: "Busca no Jackett com ranking inteligente e prioridade PT-BR. Configure os indexers e pesos antes de instalar.",
-    resources:   ["stream"],
-    types:       ["movie", "series"],
-    idPrefixes:  ["tt", "kitsu:"],
-    catalogs:    [],
-    behaviorHints: {
-      configurable:          true,
-      configurationRequired: true,
-      p2p:                   true,
-    },
+    id: "org.prowjack.pro", version: "3.2.0", name: "ProwJack PRO",
+    description: "Busca no Jackett com ranking PT-BR e suporte a anime via Kitsu.",
+    resources: ["stream"], types: ["movie", "series"],
+    idPrefixes: ["tt", "kitsu:"], catalogs: [],
+    behaviorHints: { configurable: true, configurationRequired: true, p2p: true },
   });
 });
 
-// ─────────────────────────────────────────────────────────
-// PÁGINA DE CONFIGURAÇÃO
-// ─────────────────────────────────────────────────────────
 app.get("/configure", (_, res) =>
   res.sendFile(path.join(__dirname, "public", "configure.html"))
 );
-
 app.get("/", (_, res) => res.redirect("/configure"));
 
-// ─────────────────────────────────────────────────────────
-// MANIFEST COM CONFIG
-// ─────────────────────────────────────────────────────────
 app.get("/:userConfig/manifest.json", (req, res) => {
   const prefs = resolvePrefs(req.params.userConfig);
-
-  // Normaliza categorias: anime → series (Stremio não tem tipo "anime")
   const types = [...new Set(
     (prefs.categories || ["movie", "series"]).map(c =>
-      c === "movies" ? "movie" :
-      c === "anime"  ? "series" : c
+      c === "movies" ? "movie" : c === "anime" ? "series" : c
     )
   )];
-
-  const indexerLabel = (prefs.indexers || []).includes("all")
+  const ixLabel = (prefs.indexers || []).includes("all")
     ? "todos os indexers"
     : (prefs.indexers || []).join(", ");
-
   res.json({
-    id:          "org.prowjack.pro",
-    version:     "3.1.0",
-    name:        "ProwJack PRO",
-    description: `Jackett (${indexerLabel}) · Ranking PT-BR · Redis cache`,
-    resources:   ["stream"],
-    types,
-    // kitsu: prefix necessário para o Stremio rotear animes do Kitsu para este addon
-    idPrefixes:  ["tt", "kitsu:"],
-    catalogs:    [],
-    behaviorHints: {
-      configurable:          true,
-      configurationRequired: false,
-      p2p:                   true,
-    },
+    id: "org.prowjack.pro", version: "3.2.0", name: "ProwJack PRO",
+    description: `Jackett (${ixLabel}) · Ranking PT-BR · Anime via Kitsu`,
+    resources: ["stream"], types,
+    idPrefixes: ["tt", "kitsu:"], catalogs: [],
+    behaviorHints: { configurable: true, configurationRequired: false, p2p: true },
   });
 });
 
@@ -586,34 +648,14 @@ app.get("/:userConfig/manifest.json", (req, res) => {
 const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i;
 
 app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
-  const prefs  = resolvePrefs(req.params.userConfig);
+  const prefs = resolvePrefs(req.params.userConfig);
   const { type, id } = req.params;
 
   try {
-    const imdbId            = id.split(":")[0];
-    const { title, isAnime } = await getTitle(type, imdbId);
-    let query               = title;
+    const { parsed, displayTitle, queries } = await buildQueries(type, id);
+    console.log(`🎬 ${type} ${id} [${parsed.source}] → queries: ${JSON.stringify(queries)}`);
 
-    if (type === "series" && id.includes(":")) {
-      const [, s, e] = id.split(":");
-      if (isAnime) {
-        // Anime: usa só o número do episódio absoluto (melhor resultado no Jackett/Nyaa)
-        const epNum = parseInt(e, 10);
-        query += ` ${epNum}`;
-      } else {
-        // Série normal: formato SxxExx
-        query += ` S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`;
-      }
-    }
-
-    console.log(`🎬 ${type} ${id} [${isAnime ? "anime/kitsu" : "imdb"}] → "${query}"`);
-
-    const results = await jackettSearch(query, prefs);
-
-    if (results.length > 0) {
-      const s = results[0];
-      console.log(`🔍 Sample: InfoHash=${s.InfoHash||"null"} MagnetUri=${s.MagnetUri?"ok":"null"} Link=${s.Link?"ok":"null"}`);
-    }
+    const results = await jackettSearch(queries, prefs);
 
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
@@ -624,22 +666,24 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     const resolved = await Promise.all(
       candidates.map(async r => {
         const infoHash = await resolveInfoHash(r);
-        if (!infoHash) {
-          console.log(`  ⚠️  sem infoHash: "${(r.Title||"").slice(0,50)}"`);
-          return null;
-        }
+        if (!infoHash) { console.log(`  ⚠️ sem infoHash: "${(r.Title||"").slice(0,80)}"`); return null; }
         const indexerName = r.Tracker || r.TrackerId || "Unknown";
         const { name, description } = formatStream(r, indexerName);
         const sources = r.MagnetUri ? [r.MagnetUri] : [];
-        return { name, description, infoHash, sources,
-                 behaviorHints: { bingeGroup: `prowjack|${infoHash}` } };
+        return {
+          name, description, infoHash, sources,
+          behaviorHints: {
+            bingeGroup: parsed.isAnime
+              ? `prowjack|anime|${displayTitle}`
+              : `prowjack|${infoHash}`,
+          },
+        };
       })
     );
+
     const streams = resolved.filter(Boolean);
-
-    console.log(`✅ ${streams.length} streams → ${query}`);
+    console.log(`✅ ${streams.length} streams → "${displayTitle}"`);
     res.json({ streams });
-
   } catch (err) {
     console.error(`💥 ${err.message}`);
     res.json({ streams: [] });
@@ -652,6 +696,6 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 app.listen(ENV.port, () => {
   console.log(`🚀 ProwJack PRO → http://localhost:${ENV.port}/configure`);
   console.log(`   Jackett : ${ENV.jackettUrl}`);
-  console.log(`   Indexers: ${ENV.indexers.join(", ")}`);
+  console.log(`   ApiKey  : ${ENV.apiKey ? "✔ definida" : "✗ não definida"}`);
   console.log(`   Redis   : ${ENV.redisUrl}`);
 });
