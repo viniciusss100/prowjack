@@ -38,7 +38,7 @@ const rc = {
   async del(k)         { try { redis && await redis.del(k); } catch {} },
   async keys(p)        { try { return redis ? await redis.keys(p) : []; } catch { return []; } },
 };
-const CACHE_VERSION = "v4-ptbr-strict-proxy-v4";
+const CACHE_VERSION = "v5-priority-lang";
 // ─────────────────────────────────────────────────────────
 // INDEXERS (ISOLAMENTO DE ANIME)
 // ─────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ async function resolveSearchIndexers(prefs, isAnime) {
   if (isAnime) {
     const animePool = pool.filter(id => isAnimeOnly(id));
     if (animePool.length > 0) return animePool;
-    return pool; // sem indexers de anime configurados: usa todos
+    return pool;
   }
   const generalPool = pool.filter(id => !isAnimeOnly(id));
   return generalPool.length > 0 ? generalPool : pool;
@@ -91,7 +91,7 @@ async function setRateLimit(indexer, retryAfterHeader) {
   await rc.set(`rl:${indexer}`, "1", ttl);
 }
 // ─────────────────────────────────────────────────────────
-// CONFIG (Base64URL Nativo)
+// CONFIG (Base64URL)
 // ─────────────────────────────────────────────────────────
 function decodeUserCfg(str) {
   try {
@@ -107,6 +107,18 @@ function defaultPrefs() {
     maxResults:      20,
     slowThreshold:   8000,
     skipBadReleases: true,
+    // ── Idioma ──────────────────────────────────────────
+    // priorityLang: qual idioma aparece no topo dos resultados.
+    //   "pt-br" → PT-BR/Dublado primeiro (padrão histórico).
+    //   ""      → sem preferência; rankeado puramente por
+    //             qualidade/seeders/tamanho/codec.
+    // Isso corrige o bug em que resultados não-dublados eram
+    // efetivamente excluídos mesmo com onlyDubbed: false,
+    // pois o bônus de 1000 pts para PT-BR tornava impossível
+    // que outros idiomas aparecessem dentro do limite maxResults.
+    priorityLang:    "pt-br",
+    // onlyDubbed: filtro estrito — só mostra o idioma prioritário.
+    // Usa priorityLang como referência, não mais PT-BR hardcoded.
     onlyDubbed:      false,
     debrid:          false,
   };
@@ -115,10 +127,13 @@ function resolvePrefs(encoded) {
   const u = encoded ? (decodeUserCfg(encoded) || {}) : {};
   const m = { ...defaultPrefs(), ...u };
   if (!Array.isArray(m.indexers) || !m.indexers.length) m.indexers = ["all"];
+  // Compatibilidade retroativa: URLs antigas sem priorityLang
+  // mas com onlyDubbed:true devem continuar filtrando PT-BR.
+  if (m.priorityLang === undefined) m.priorityLang = "pt-br";
   return m;
 }
 // ─────────────────────────────────────────────────────────
-// PARSERS E DICIONARIOS
+// PARSERS E DICIONÁRIOS
 // ─────────────────────────────────────────────────────────
 const RESOLUTION = [
   { re: /\b(4k|2160p)\b/i, label: "2160p", emoji: "🎞️ 4K",  score: 4   },
@@ -180,7 +195,7 @@ function qp(extra = {}) {
   return p;
 }
 // ─────────────────────────────────────────────────────────
-// INTELIGENCIA DE IDIOMA E PRIORIDADE
+// DETECÇÃO DE IDIOMA
 // ─────────────────────────────────────────────────────────
 function getLangs(title, isAnime) {
   const langs  = matchAll(LANG, title);
@@ -190,19 +205,37 @@ function getLangs(title, isAnime) {
   }
   return langs;
 }
-function score(r, weights = {}, isAnime = false) {
+// ─────────────────────────────────────────────────────────
+// SCORE — parametrizado por priorityLang
+//
+// FIX PRINCIPAL: antes, o bônus de PT-BR era hardcoded (1000 pts),
+// tornando impossível que resultados em outros idiomas aparecessem
+// nos primeiros maxResults quando havia torrents PT-BR suficientes.
+// Agora:
+//   • priorityLang definido → idioma selecionado recebe bônus 25x
+//     (mesmo comportamento de antes, mas para qualquer idioma)
+//   • priorityLang vazio    → nenhum idioma recebe bônus especial;
+//     todos pontuam igualmente e o ranking é puro qualidade/seeders.
+// ─────────────────────────────────────────────────────────
+function score(r, weights = {}, isAnime = false, priorityLang = "") {
   const w = { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5, ...weights };
   const t = r.Title || "";
   let s   = 0;
-  const langs   = getLangs(t, isAnime);
-  const hasPtBr = langs.some(l => l.code === "pt-br");
-  const hasEn   = langs.some(l => l.code === "en");
-  const isMulti = /(multi)[-.\s]?(audio)?/i.test(t);
-  if      (hasPtBr)                                          s += w.language * 25;
-  else if (isAnime && /(dual)[-.\s]?(audio)?/i.test(t))     s += w.language * 15;
-  else if (isMulti)                                          s += w.language * 10;
-  else if (hasEn)                                            s += w.language * 5;
-  else                                                       s += w.language * 2;
+
+  const langs      = getLangs(t, isAnime);
+  const hasPriority = priorityLang
+    ? langs.some(l => l.code === priorityLang)
+    : false;
+  const isMulti    = /(multi)[-.\s]?(audio)?/i.test(t);
+  const isDualAnim = isAnime && /(dual)[-.\s]?(audio)?/i.test(t);
+
+  if (priorityLang && hasPriority)  s += w.language * 25;  // idioma prioritário: bônus alto
+  else if (isDualAnim)              s += w.language * 15;  // anime dual-audio: bônus médio
+  else if (isMulti)                 s += w.language * 10;  // multi-áudio: bônus moderado
+  else if (langs.length > 0)        s += w.language * 5;   // qualquer idioma identificado
+  else                              s += w.language * 2;   // idioma desconhecido
+
+  // Resolução, qualidade, seeders, tamanho, codec — sem mudança
   const res  = first(RESOLUTION, t); if (res)  s += res.score  * w.resolution * 10;
   const qual = first(QUALITY,    t); if (qual) s += qual.score * 50;
   s += (r.Seeders || 0) * (w.seeders / 10);
@@ -212,7 +245,7 @@ function score(r, weights = {}, isAnime = false) {
   return s;
 }
 // ─────────────────────────────────────────────────────────
-// FILTRO ESTRITO DE EPISODIOS
+// FILTRO ESTRITO DE EPISÓDIOS
 // ─────────────────────────────────────────────────────────
 function seriesEpisodeMatches(title, season, episode) {
   if (season == null || episode == null) return true;
@@ -246,7 +279,7 @@ function animeEpisodeMatches(title, ep) {
   return false;
 }
 // ─────────────────────────────────────────────────────────
-// DEDUPLICACAO
+// DEDUPLICAÇÃO
 // ─────────────────────────────────────────────────────────
 function normalizeForDedupe(str) {
   if (!str) return null;
@@ -379,9 +412,9 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}) {
   if (langs.length) langDisplay.push(langs.map(l => `${l.emoji} ${l.label}`).join(" / "));
   else langDisplay.push("🌐 Original");
   const isMulti = /(multi|dual)[-.\s]?(audio)?/i.test(t);
-  if      (isMulti && isAnime)                             langDisplay.push("🎧 Multi/Dual-Audio");
+  if      (isMulti && isAnime)                              langDisplay.push("🎧 Multi/Dual-Audio");
   else if (isMulti && !langs.some(l => l.code === "pt-br")) langDisplay.push("🎧 Multi");
-  const clean   = t.replace(/\b\d{4}\b\.?/g, " ").replace(/\./g, " ").replace(/\s{2,}/g, " ").trim();
+  const clean    = t.replace(/\b\d{4}\b\.?/g, " ").replace(/\./g, " ").replace(/\s{2,}/g, " ").trim();
   const p2pLabel = prefs.debrid ? "" : "⚠️ P2P";
   const desc = [
     `🎬 ${clean}`,
@@ -429,12 +462,9 @@ async function jackettSearch(queries, indexers, prefs) {
     console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
     return JSON.parse(cached);
   }
-
-  // FIX 1: usa prefs.slowThreshold como timeout da janela rápida, em vez de
-  //         uma constante hardcoded que ignorava o valor configurado pelo usuário.
-  const FAST_TIMEOUT = (prefs?.slowThreshold) || 12000;
+  // FIX: slowThreshold do usuário como timeout da fase rápida.
+  const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 12000);
   const SLOW_TIMEOUT = 50000;
-
   const tasks = [];
   for (const query of queryList) {
     console.log(`Jackett iniciando busca: "${query}" em [${indexers.length} indexers]`);
@@ -495,12 +525,10 @@ async function getCinemetaTitle(type, imdbId) {
     const genres  = (meta?.genres   || []).map(g => g.toLowerCase());
     const country = (meta?.country  || "").toLowerCase();
     const lang    = (meta?.language || "").toLowerCase();
-
     const isAnime =
       genres.includes("anime") ||
       (genres.includes("animation") && (country.includes("japan") || country.includes("jp"))) ||
       (genres.includes("animation") && (lang.includes("japanese") || lang.includes("japan") || lang === "ja"));
-
     return {
       title  : meta?.name || imdbId,
       aliases: uniq([meta?.name, meta?.originalName, ...(meta?.aliases || [])]).map(normTitle),
@@ -510,7 +538,6 @@ async function getCinemetaTitle(type, imdbId) {
     return { title: imdbId, aliases: [normTitle(imdbId)], isAnime: false };
   }
 }
-
 async function getKitsuMeta(kitsuId) {
   try {
     const res   = await axios.get(
@@ -530,7 +557,6 @@ async function getKitsuMeta(kitsuId) {
     return { title: String(kitsuId), aliases: [String(kitsuId)] };
   }
 }
-
 function parseStreamId(type, id) {
   if (id.startsWith("kitsu:")) {
     const parts = id.split(":");
@@ -549,14 +575,11 @@ function parseStreamId(type, id) {
   }
   return { source: "imdb", isAnime: false, metaId: id, season: null, episode: null, type };
 }
-
 // ─────────────────────────────────────────────────────────
 // BUILD QUERIES
 // ─────────────────────────────────────────────────────────
 async function buildQueries(type, id) {
   const parsed = parseStreamId(type, id);
-
-  // ── Kitsu (sempre anime) ──────────────────────────────────────────────────
   if (parsed.isAnime) {
     const meta = await getKitsuMeta(parsed.kitsuId);
     const ep   = parsed.episode;
@@ -568,18 +591,13 @@ async function buildQueries(type, id) {
       : uniq(meta.aliases);
     return { parsed, displayTitle: meta.title, queries, episode: ep };
   }
-
-  // ── IMDB / Cinemeta ───────────────────────────────────────────────────────
   const meta = await getCinemetaTitle(type, parsed.metaId);
-
   if (meta.isAnime) {
     parsed.isAnime = true;
     console.log(`[Cinemeta] Anime detectado: "${meta.title}" — usando indexers e filtros de anime`);
   }
-
   let queries;
   let episode = null;
-
   if (parsed.isAnime && parsed.season != null && parsed.episode != null) {
     episode = parsed.episode;
     queries = uniq(meta.aliases.flatMap(t => [
@@ -597,7 +615,6 @@ async function buildQueries(type, id) {
   } else {
     queries = [meta.title];
   }
-
   return {
     parsed,
     displayTitle: meta.title,
@@ -628,7 +645,7 @@ app.delete("/api/metrics/:indexer", async (req, res) => {
 });
 app.get("/manifest.json", (_, res) => {
   res.json({
-    id: "org.prowjack.pro", version: "3.6.0", name: "ProwJack PRO",
+    id: "org.prowjack.pro", version: "3.7.0", name: "ProwJack PRO",
     description: "Configure os parametros pela URL.",
     resources: ["stream"], types: ["movie", "series"], idPrefixes: ["tt", "kitsu:"],
     catalogs: [], behaviorHints: { configurable: true, configurationRequired: true, p2p: true },
@@ -647,14 +664,14 @@ app.get("/:userConfig/manifest.json", (req, res) => {
   const types = [...new Set((prefs.categories || ["movie","series"]).map(c => c==="movies"?"movie":c==="anime"?"series":c))];
   const name  = prefs.addonName || "ProwJack PRO";
   res.json({
-    id: "org.prowjack.pro", version: "3.6.0", name,
+    id: "org.prowjack.pro", version: "3.7.0", name,
     description: `Jackett Otimizado · Prioridade PT-BR`,
     resources: ["stream"], types, idPrefixes: ["tt", "kitsu:"], catalogs: [],
     behaviorHints: { configurable: true, configurationRequired: false, p2p: !prefs.debrid },
   });
 });
 // ─────────────────────────────────────────────────────────
-// STREAMS COM BACKEND PROXY
+// STREAMS
 // ─────────────────────────────────────────────────────────
 const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i;
 app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
@@ -677,7 +694,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     const b64Wrap     = Buffer.from(JSON.stringify(wrapper), 'utf8').toString('base64');
     const stUrl       = `${prefs.stConfig.url}/stremio/wrap/${encodeURIComponent(b64Wrap)}/stream/${type}/${id}.json`;
     try {
-      const { data } = await axios.get(stUrl, { timeout: 60000, headers: { "User-Agent": "ProwJack/3.6" } });
+      const { data } = await axios.get(stUrl, { timeout: 60000, headers: { "User-Agent": "ProwJack/3.7" } });
       console.log(`[PROXY] Sucesso! ${data?.streams?.length || 0} links.`);
       console.log(`=========================================\n`);
       return res.json({ streams: data.streams || [] });
@@ -691,38 +708,34 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   try {
     const { parsed, displayTitle, queries, episode } = await buildQueries(type, id);
 
-    // FIX 3: verifica se o tipo de conteúdo está habilitado nas categorias
-    //         configuradas pelo usuário. Sem isso, desativar "anime", "séries"
-    //         ou "filmes" na interface não tinha nenhum efeito sobre os streams.
+    // Verificação de categorias habilitadas
     const enabledCats = Array.isArray(prefs.categories) && prefs.categories.length
       ? prefs.categories
       : ["movie", "series"];
-
     if (parsed.isAnime && !enabledCats.includes("anime")) {
-      console.log(`[Categoria] Conteudo anime bloqueado (anime nao esta nas categorias habilitadas)`);
+      console.log(`[Categoria] Anime bloqueado pelas preferencias do usuario`);
       console.log(`=========================================\n`);
       return res.json({ streams: [] });
     }
     if (!parsed.isAnime && type === "series" && !enabledCats.includes("series")) {
-      console.log(`[Categoria] Serie bloqueada (series nao esta nas categorias habilitadas)`);
+      console.log(`[Categoria] Serie bloqueada pelas preferencias do usuario`);
       console.log(`=========================================\n`);
       return res.json({ streams: [] });
     }
     if (type === "movie" && !enabledCats.includes("movie")) {
-      console.log(`[Categoria] Filme bloqueado (movie nao esta nas categorias habilitadas)`);
+      console.log(`[Categoria] Filme bloqueado pelas preferencias do usuario`);
       console.log(`=========================================\n`);
       return res.json({ streams: [] });
     }
 
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
     const results  = await jackettSearch(queries, indexers, prefs);
-    let rejectedBySeriesFilter = 0;
 
-    // FIX 2: o .slice(maxResults) foi movido para DEPOIS do resolveInfoHash.
-    //         Antes, o slice era aplicado sobre os candidatos brutos, e se vários
-    //         falhassem na resolução do infoHash, o resultado final ficava muito
-    //         menor que o maxResults configurado. Agora resolvemos todos os
-    //         candidatos filtrados e cortamos apenas no resultado final.
+    // Idioma prioritário — determina o bônus no score e o alvo do filtro estrito.
+    // Vazio = sem preferência de idioma (ranking por qualidade/seeders apenas).
+    const priorityLang = prefs.priorityLang ?? "pt-br";
+
+    let rejectedBySeriesFilter = 0;
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
       .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))
@@ -735,18 +748,35 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         }
         return true;
       })
+      // FIX: filtro de idioma agora usa priorityLang em vez de "pt-br" hardcoded.
+      // Quando onlyDubbed:false, NENHUM resultado é excluído por idioma.
+      // Quando onlyDubbed:true, só passa o idioma prioritário selecionado.
       .filter(r => {
         if (!prefs.onlyDubbed) return true;
-        return getLangs(r.Title || "", parsed.isAnime).some(l => l.code === "pt-br");
+        if (!priorityLang)     return true; // sem lang definida = sem filtro
+        return getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang);
       })
-      .sort((a, b) => score(b, prefs.weights, parsed.isAnime) - score(a, prefs.weights, parsed.isAnime));
+      // FIX PRINCIPAL: score() agora recebe priorityLang.
+      // Quando priorityLang="" : todos os idiomas pontuam igual — não-dublados
+      //                          aparecem normalmente, ordenados por qualidade.
+      // Quando priorityLang set: idioma selecionado aparece no topo, mas os
+      //                          demais ainda aparecem abaixo (sem exclusão).
+      .sort((a, b) =>
+        score(b, prefs.weights, parsed.isAnime, priorityLang) -
+        score(a, prefs.weights, parsed.isAnime, priorityLang)
+      );
+    // Nota: .slice() aplicado APÓS resolveInfoHash (fix Bug 2 anterior).
 
     if (type === "series" && rejectedBySeriesFilter > 0)
       console.log(`Filtro de Serie: ${rejectedBySeriesFilter} resultados descartados.`);
 
-    console.log(`Extraindo InfoHash de ${candidates.length} candidatos filtrados...`);
+    const langLabel = priorityLang
+      ? `Idioma prioritário: ${priorityLang.toUpperCase()}`
+      : `Sem preferência de idioma`;
+    console.log(`${langLabel} | onlyDubbed: ${prefs.onlyDubbed}`);
+    console.log(`Extraindo InfoHash de ${candidates.length} links promissores...`);
 
-    const resolved = await Promise.all(
+    const resolvedAll = await Promise.all(
       candidates.map(async r => {
         const infoHash = await resolveInfoHash(r);
         if (!infoHash) {
@@ -767,8 +797,8 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       })
     );
 
-    // Slice aplicado aqui, após resolução — garante o número real de streams
-    const finalStreams = resolved.filter(Boolean).slice(0, prefs.maxResults || 20);
+    // Slice após resolução — garante maxResults streams válidos, não candidatos brutos.
+    const finalStreams = resolvedAll.filter(Boolean).slice(0, prefs.maxResults || 20);
 
     console.log(`Magnets prontos: Enviando ${finalStreams.length} torrents!`);
     console.log(`=========================================\n`);
@@ -779,7 +809,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   }
 });
 app.listen(ENV.port, () => {
-  console.log(`ProwJack PRO v3.6.0 -> http://localhost:${ENV.port}/configure`);
+  console.log(`ProwJack PRO v3.7.0 -> http://localhost:${ENV.port}/configure`);
   console.log(`   Jackett : ${ENV.jackettUrl}`);
   console.log(`   Redis   : ${ENV.redisUrl}`);
 });
