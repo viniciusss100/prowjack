@@ -95,6 +95,18 @@ input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px
 
 .anime-info{background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:3px;padding:10px 14px;margin-top:10px;font-size:11px;color:var(--amber);line-height:1.8}
 
+/* ── Caixa de idioma prioritário ───────────────────────────────── */
+.lang-box{background:rgba(245,166,35,.04);border:1px solid var(--bord2);border-radius:3px;padding:12px 14px;margin-top:14px}
+.lang-box-title{font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+.lang-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-bottom:10px}
+.lang-btn{display:flex;align-items:center;gap:7px;padding:7px 10px;background:#080910;border:1px solid var(--bord);border-radius:3px;cursor:pointer;transition:.15s;font-family:var(--mono);font-size:11px;color:var(--dim);user-select:none}
+.lang-btn:hover{border-color:var(--bord2);color:var(--text)}
+.lang-btn.selected{border-color:var(--amber);background:rgba(245,166,35,.08);color:var(--amber)}
+.lang-btn .flag{font-size:14px;flex-shrink:0}
+.lang-info{font-size:10px;color:var(--dim);line-height:1.7;margin-top:8px}
+.lang-info strong{color:var(--text)}
+/* ─────────────────────────────────────────────────────────────── */
+
 .metrics-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
 .mc{background:var(--sur);border:1px solid var(--bord);border-radius:4px;padding:14px}
 .mc-name{font-family:var(--sans);font-weight:700;font-size:13px;color:#fff;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
@@ -124,7 +136,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
   <div>
     <div class="logo-wrap">
       <span class="logo-name">ProwJack</span>
-      <span class="logo-v">PRO v3.6</span>
+      <span class="logo-v">PRO v3.7</span>
     </div>
     <div class="logo-sub">Stremio · Jackett · Smart Ranking</div>
   </div>
@@ -185,8 +197,49 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 
     <div class="tg-group mt8">
       <button class="tg on" id="skipBadBtn" onclick="this.classList.toggle('on')">⛔ Ignorar CAM/TS</button>
-      <button class="tg" id="onlyDubbedBtn" onclick="this.classList.toggle('on')">🇧🇷 Apenas Dublado/PT-BR</button>
     </div>
+
+    <!-- ── Idioma Prioritário ──────────────────────────────────────── -->
+    <!--
+      FIX: antes havia um botão "🇧🇷 Apenas Dublado/PT-BR" que, combinado
+      com o bônus hardcoded de 1000 pts para PT-BR no score(), fazia com
+      que resultados não-dublados ficassem efetivamente excluídos mesmo com
+      o botão desativado — pois não cabiam dentro do maxResults.
+      
+      Agora:
+        • "Idioma Prioritário" → define qual idioma aparece no TOPO.
+          "Nenhum" = ranking puramente por qualidade/seeders, todos os
+          idiomas aparecem sem preferência.
+        • "🔒 Apenas esse idioma" → filtro estrito, funciona para qualquer
+          idioma selecionado (não só PT-BR).
+    -->
+    <div class="lang-box">
+      <div class="lang-box-title">🌐 Idioma Prioritário</div>
+      <div class="lang-grid" id="lang-grid">
+        <div class="lang-btn" data-lang="" onclick="selectLang(this)">
+          <span class="flag">🌐</span><span>Nenhum</span>
+        </div>
+        <div class="lang-btn selected" data-lang="pt-br" onclick="selectLang(this)">
+          <span class="flag">🇧🇷</span><span>PT-BR</span>
+        </div>
+        <div class="lang-btn" data-lang="en" onclick="selectLang(this)">
+          <span class="flag">🇺🇸</span><span>Inglês</span>
+        </div>
+        <div class="lang-btn" data-lang="es" onclick="selectLang(this)">
+          <span class="flag">🇪🇸</span><span>Espanhol</span>
+        </div>
+        <div class="lang-btn" data-lang="fr" onclick="selectLang(this)">
+          <span class="flag">🇫🇷</span><span>Francês</span>
+        </div>
+      </div>
+      <div class="lang-info" id="lang-desc">
+        <strong>🇧🇷 PT-BR selecionado</strong> — resultados dublados/PT-BR aparecem no topo. Demais idiomas continuam visíveis abaixo, ordenados por qualidade e seeders.
+      </div>
+      <div class="tg-group" style="margin-top:10px;margin-bottom:0">
+        <button class="tg" id="onlyLangBtn" onclick="this.classList.toggle('on')">🔒 Apenas esse idioma</button>
+      </div>
+    </div>
+    <!-- ──────────────────────────────────────────────────────────── -->
   </div>
 
   <div class="card full">
@@ -206,7 +259,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 
   <div class="card full">
     <div class="ctitle">🔌 StremThru Wrap (Debrid Proxy)</div>
-    <p class="info" style="margin-bottom:12px">Opcional: Suporta até 2 contas Debrid usando StremThru como proxy em backgroud. O rótulo "P2P" sumirá e o addon se adaptará à sigla do seu serviço!</p>
+    <p class="info" style="margin-bottom:12px">Opcional: Suporta até 2 contas Debrid usando StremThru como proxy em background. O rótulo "P2P" sumirá e o addon se adaptará à sigla do seu serviço!</p>
     
     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text); font-size:12px;">
       <input type="checkbox" id="useStremThru" style="width:16px; height:16px; accent-color:var(--amber);" onchange="document.getElementById('stremThruConfig').style.display = this.checked ? 'block' : 'none'">
@@ -284,7 +337,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
   <div class="card">
     <div class="ctitle">Pesos do Score</div>
     <div class="w-row">
-      <div class="w-label">🇧🇷 Idioma</div>
+      <div class="w-label">🌐 Idioma</div>
       <input type="range" id="w-lang" min="0" max="100" value="40" oninput="sv(this,'wv-lang');preview()" />
       <div class="w-val" id="wv-lang">40</div>
     </div>
@@ -322,7 +375,6 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
       <button class="btn btn-p" onclick="loadMetrics()">🔄 Atualizar</button>
       <span class="info">Dados do Redis — últimas 24h</span>
     </div>
-  
     <div class="metrics-g" id="metrics-g">
       <div class="empty">Clique em Atualizar</div>
     </div>
@@ -336,7 +388,26 @@ const state = {
   allIndexers: [],
   selectedIndexers: [],
   useAll: true,
+  priorityLang: 'pt-br', // padrão: PT-BR no topo
 };
+
+// ── Idioma Prioritário ────────────────────────────────────────────
+const LANG_DESCS = {
+  '':     '🌐 <strong>Sem preferência</strong> — resultados ordenados puramente por qualidade, resolução e seeders. Todos os idiomas aparecem de forma igual.',
+  'pt-br':'🇧🇷 <strong>PT-BR selecionado</strong> — resultados dublados/PT-BR aparecem no topo. Demais idiomas continuam visíveis abaixo, ordenados por qualidade e seeders.',
+  'en':   '🇺🇸 <strong>Inglês selecionado</strong> — resultados em inglês aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+  'es':   '🇪🇸 <strong>Espanhol selecionado</strong> — resultados em espanhol aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+  'fr':   '🇫🇷 <strong>Francês selecionado</strong> — resultados em francês aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+};
+
+function selectLang(el) {
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  state.priorityLang = el.dataset.lang;
+  document.getElementById('lang-desc').innerHTML = LANG_DESCS[state.priorityLang] || '';
+  preview();
+}
+// ─────────────────────────────────────────────────────────────────
 
 function sv(el, id) { document.getElementById(id).textContent = el.value; }
 function toast(msg, err=false) {
@@ -445,14 +516,30 @@ function getWeights() { return { language: +document.getElementById('w-lang').va
 
 function preview() {
   const w = getWeights();
+  const pl = state.priorityLang; // idioma prioritário atual
   const examples = [
     { t: 'Duna.2021.1080p.BluRay.x265.Dublado', seeds: 850, sizeGb: 6.2 },
     { t: 'Dune.2021.2160p.UHD.REMUX.Atmos', seeds: 1500, sizeGb: 58 },
     { t: 'Dune.2021.1080p.WEBRip.x264', seeds: 3200, sizeGb: 2.1 }
   ];
+  function matchesPriority(t) {
+    if (!pl) return false;
+    if (pl === 'pt-br') return /(dublado|pt[-.]?br)/i.test(t);
+    if (pl === 'en')    return /\b(english|eng)\b/i.test(t);
+    if (pl === 'es')    return /(espa[nñ]ol|spanish)/i.test(t);
+    if (pl === 'fr')    return /(fran[cç]ais|french)/i.test(t);
+    return false;
+  }
+  function hasAnyLang(t) {
+    return /(dublado|pt[-.]?br|english|eng|espa[nñ]ol|fran[cç]ais)/i.test(t);
+  }
   function calcScore(ex) {
     let s = 0;
-    if (/(dublado|pt[-.]?br)/i.test(ex.t)) s += w.language * 25;
+    // Mesmo cálculo do addon.js score() com priorityLang
+    if (pl && matchesPriority(ex.t))            s += w.language * 25;
+    else if (/(multi|dual)/i.test(ex.t))        s += w.language * 10;
+    else if (hasAnyLang(ex.t))                  s += w.language * 5;
+    else                                         s += w.language * 2;
     if (/4k|2160/i.test(ex.t)) s += 4 * w.resolution * 10; else if (/1080/i.test(ex.t)) s += 3 * w.resolution * 10; else if (/720/i.test(ex.t)) s += 2 * w.resolution * 10;
     if (/remux/i.test(ex.t)) s += 5 * 50; else if (/bluray/i.test(ex.t)) s += 4 * 50; else if (/webrip/i.test(ex.t)) s += 2.5 * 50;
     s += ex.seeds * (w.seeders / 10); s += Math.max(0, 10 - Math.abs(ex.sizeGb - 8)) * w.size;
@@ -463,7 +550,6 @@ function preview() {
   document.getElementById('preview-box').innerHTML = scored.map((e, i) => `${['🥇','🥈','🥉'][i]} Score: <strong style="color:var(--amber)">${e.score}</strong>\n   ${e.t}`).join('\n\n');
 }
 
-// ⚡ NOVA GERAÇÃO NATIVA EM BASE64
 function encodeBaseURL(obj) {
     const jsonStr = JSON.stringify(obj);
     const utf8Str = unescape(encodeURIComponent(jsonStr));
@@ -471,23 +557,28 @@ function encodeBaseURL(obj) {
 }
 
 function buildPrefs() {
-  const selected = state.selectedIndexers.length ? state.selectedIndexers : ['all'];
-  const isDebrid = document.getElementById('useStremThru').checked;
+  const selected  = state.selectedIndexers.length ? state.selectedIndexers : ['all'];
+  const isDebrid  = document.getElementById('useStremThru').checked;
 
   const prefs = {
-    indexers: state.useAll ? ['all'] : selected,
-    categories: getCats(),
-    weights: getWeights(),
-    maxResults: +document.getElementById('maxResults').value,
-    slowThreshold: +document.getElementById('slowThreshold').value,
+    indexers:        state.useAll ? ['all'] : selected,
+    categories:      getCats(),
+    weights:         getWeights(),
+    maxResults:      +document.getElementById('maxResults').value,
+    slowThreshold:   +document.getElementById('slowThreshold').value,
     skipBadReleases: document.getElementById('skipBadBtn').classList.contains('on'),
-    onlyDubbed: document.getElementById('onlyDubbedBtn').classList.contains('on'),
-    debrid: isDebrid
+    // FIX: priorityLang vem do seletor de idioma (state.priorityLang).
+    // "" = sem preferência; ranking puro por qualidade/seeders.
+    // "pt-br"/"en"/etc. = idioma prioritário aparece no topo, demais ainda aparecem.
+    priorityLang:    state.priorityLang,
+    // onlyDubbed agora usa o botão "🔒 Apenas esse idioma", vinculado ao priorityLang.
+    // Quando priorityLang="" e onlyDubbed=true, o addon ignora o filtro por segurança.
+    onlyDubbed:      document.getElementById('onlyLangBtn').classList.contains('on'),
+    debrid:          isDebrid,
   };
 
-  // ⚡ Se for usar proxy Debrid, salva os tokens no JSON (para uso interno do Addon apenas)
   if (isDebrid) {
-    const stUrl = document.getElementById('stUrl').value.trim().replace(/\/$/, '');
+    const stUrl    = document.getElementById('stUrl').value.trim().replace(/\/$/, '');
     const stStore1 = document.getElementById('stStore1').value;
     const stToken1 = document.getElementById('stToken1').value.trim();
     const stStore2 = document.getElementById('stStore2').value;
@@ -496,12 +587,10 @@ function buildPrefs() {
     if (!stToken1) throw new Error("stToken1_missing");
 
     const storesArray = [{ c: stStore1, t: stToken1 }];
-    if (stStore2 && stToken2) {
-      storesArray.push({ c: stStore2, t: stToken2 });
-    }
+    if (stStore2 && stToken2) storesArray.push({ c: stStore2, t: stToken2 });
 
-    prefs.stConfig = { url: stUrl, stores: storesArray };
-    prefs.addonName = `ProwJack [${stStore1.toUpperCase()}]`; // Customiza o nome do Addon!
+    prefs.stConfig   = { url: stUrl, stores: storesArray };
+    prefs.addonName  = `ProwJack [${stStore1.toUpperCase()}]`;
   } else {
     prefs.addonName = `ProwJack PRO`;
   }
@@ -511,13 +600,10 @@ function buildPrefs() {
 
 function generate() {
   try {
-    const prefs = buildPrefs();
-    
-    // Agora a URL que você instala NUNCA é do StremThru, é SEMPRE do ProwJack.
-    // Isso esconde o "StremThru Wrap" e mantém o nome que você escolher.
+    const prefs   = buildPrefs();
     const encoded = encodeBaseURL(prefs);
     const finalManifestUrl = `${location.origin}/${encoded}/manifest.json`;
-    const finalStremioUrl = `stremio://${location.host}/${encoded}/manifest.json`;
+    const finalStremioUrl  = `stremio://${location.host}/${encoded}/manifest.json`;
 
     if (prefs.stConfig && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       alert("⚠️ AVISO: Usando o IP 'localhost', o StremThru remoto não conseguirá alcançar este ProwJack para resolver os links Debrid. Gere a URL usando seu IP ou domínio público!");
@@ -531,7 +617,10 @@ function generate() {
     link.style.pointerEvents = 'auto';
     link.style.opacity = '1';
 
-    toast('URL gerada! Clique em Instalar no Stremio.');
+    const langLabel = prefs.priorityLang
+      ? `Idioma: ${prefs.priorityLang.toUpperCase()}` + (prefs.onlyDubbed ? ' (apenas)' : ' (prioritário)')
+      : 'Sem preferência de idioma';
+    toast(`URL gerada! ${langLabel}`);
   } catch (err) {
     if (err.message === 'stToken1_missing') {
       toast('ERRO: O Token do Serviço 1 é obrigatório!', true);
@@ -554,7 +643,7 @@ async function loadMetrics() {
     g.innerHTML = entries.map(([name, m]) => {
       const rc = m.successRate > 80 ? 'ok' : m.successRate > 50 ? 'warn' : 'bad';
       const dc = m.avgMs < 2000 ? 'ok' : m.avgMs < 5000 ? 'warn' : 'bad';
-      return `<div class="mc"><div class="mc-name">📡 ${name}<button class="btn btn-d" onclick="delMetric('${name}')">Reset</button></div><div class="mc-row"><span class=\"mk\">Chamadas</span><span class=\"mv\">${m.calls}</span></div><div class="mc-row"><span class=\"mk\">Avg tempo</span><span class=\"mv ${dc}\">${m.avgMs}ms</span></div><div class="mc-row"><span class=\"mk\">Sucesso</span><span class=\"mv ${rc}\">${m.successRate}%</span></div><div class=\"bar\"><div class=\"bar-fill\" style=\"width:${m.successRate||0}%\"></div></div></div>`;
+      return `<div class="mc"><div class="mc-name">📡 ${name}<button class="btn btn-d" onclick="delMetric('${name}')">Reset</button></div><div class="mc-row"><span class="mk">Chamadas</span><span class="mv">${m.calls}</span></div><div class="mc-row"><span class="mk">Avg tempo</span><span class="mv ${dc}">${m.avgMs}ms</span></div><div class="mc-row"><span class="mk">Sucesso</span><span class="mv ${rc}">${m.successRate}%</span></div><div class="bar"><div class="bar-fill" style="width:${m.successRate||0}%"></div></div></div>`;
     }).join('');
   } catch (e) { g.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${e.message}</div>`; }
 }
