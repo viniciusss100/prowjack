@@ -244,39 +244,163 @@ function score(r, weights = {}, isAnime = false, priorityLang = "") {
   const codec = first(CODEC, t); if (codec) s += codec.score * w.codec * 5;
   return s;
 }
+
+function normalizeTitleTokens(str) {
+  return (str || "")
+    .toLowerCase()
+    .replace(/[._]+/g, " ")
+    .replace(/[\[\(][^\]\)]*[\]\)]/g, " ")
+    .replace(/\b(19|20)\d{2}\b/g, " ")
+    .replace(/\b(s\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3}|season\s?\d{1,2}|temporada\s?\d{1,2}|episode\s?\d{1,3}|ep\s?\d{1,3})\b/gi, " ")
+    .replace(/\b(2160p|1440p|1080p|720p|576p|480p|4k|remux|blu[-.]?ray|web[-.]?dl|webrip|hdrip|dvdrip|hdtv|brrip|x26[45]|h\.?26[45]|hevc|av1|avc|dual|multi|audio|dublado|legendado|pt[-.]?br|eng|english|spanish|espa[nñ]ol|french|fran[cç]ais|aac|ac3|ddp?|eac3|atmos|truehd|dts(?:[-.]?hd|[-.]?x)?|10bit|8bit|proper|repack|extended|uncut|complete|completa|batch)\b/gi, " ")
+    .replace(/[^a-z0-9\s]/g, " " )
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(tok => tok.length >= 3 || /^(?:[a-z]\d|\d[a-z]|[a-z]\d[a-z]|\d[a-z]\d)$/i.test(tok))
+    .filter(tok => !new Set(["the", "movie", "film", "one", "two", "and", "for", "with", "from", "into", "part"]).has(tok));
+}
+
+function escapedWordRegex(text) {
+  return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function titleMatchScore(title, aliases = []) {
+  const titleTokens = normalizeTitleTokens(title);
+  const titleText   = titleTokens.join(" ");
+  if (!titleTokens.length) return 0;
+
+  let best = 0;
+  for (const alias of aliases.filter(Boolean)) {
+    const aliasTokens = normalizeTitleTokens(alias);
+    const aliasText   = aliasTokens.join(" ");
+    if (!aliasTokens.length) continue;
+
+    const aliasSet = new Set(aliasTokens);
+    const matched  = aliasTokens.filter(tok => titleTokens.includes(tok)).length;
+    const coverage = matched / aliasTokens.length;
+    const density  = matched / Math.max(titleTokens.length, aliasTokens.length);
+    const phraseHit = aliasText.length >= 5 && titleText.includes(aliasText);
+    const exactShortHit = aliasTokens.length === 1 && aliasTokens[0].length <= 3
+      ? new RegExp(`(^|[^a-z0-9])${escapedWordRegex(aliasTokens[0])}([^a-z0-9]|$)`, "i").test(String(title || ""))
+      : false;
+
+    if (!phraseHit && !exactShortHit) {
+      if (aliasTokens.length <= 2 && matched < aliasTokens.length) continue;
+      if (aliasTokens.length === 3 && matched < 2) continue;
+    }
+
+    let score      = coverage * 0.8 + density * 0.2;
+
+    if (aliasTokens.length >= 2 && matched >= aliasTokens.length - 1) score += 0.15;
+    if (titleTokens.some(tok => aliasSet.has(tok))) score += 0.05;
+    if (phraseHit) score += 0.25;
+    if (exactShortHit) score += 0.35;
+    best = Math.max(best, Math.min(score, 1));
+  }
+  return best;
+}
+
+function extractReleaseYear(text) {
+  const m = String(text || "").match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function normalizeImdbId(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^tt\d+$/i.test(raw)) return raw.toLowerCase();
+  if (/^\d+$/.test(raw)) return `tt${raw}`;
+  const m = raw.match(/tt\d+/i);
+  return m ? m[0].toLowerCase() : null;
+}
+
+function getResultImdbId(r) {
+  return normalizeImdbId(
+    r?.ImdbId || r?.Imdb || r?.imdbId || r?.imdb || r?._imdbId || r?._imdb
+  );
+}
+
+function looksLikeEpisodeRelease(title) {
+  const t = String(title || "");
+  return /\bs\d{1,2}[\s._-]*e\d{1,3}\b|\b\d{1,2}x\d{1,3}\b|\bseason\s?\d{1,2}\b|\btemporada\s?\d{1,2}\b|\bepisode\s?\d{1,3}\b|\bcap[ií]tulo\s?\d{1,3}\b/i.test(t);
+}
+
+function isCompletePack(title) {
+  return /\b(complete|completa|complete season|season pack|series pack|batch|全集)\b/i.test(title || "");
+}
+
+function parseEpisodeRanges(title, season) {
+  const t = String(title || "");
+  const s = season != null ? parseInt(season, 10) : null;
+  const ranges = [];
+
+  for (const m of t.matchAll(/\bs0*(\d{1,2})\s*e0*(\d{1,3})\s*[-~]\s*(?:e)?0*(\d{1,3})\b/gi)) {
+    const matchSeason = parseInt(m[1], 10);
+    if (s != null && matchSeason !== s) continue;
+    ranges.push({ season: matchSeason, lo: parseInt(m[2], 10), hi: parseInt(m[3], 10) });
+  }
+  for (const m of t.matchAll(/\b0*(\d{1,2})x0*(\d{1,3})\s*[-~]\s*0*(\d{1,3})\b/gi)) {
+    const matchSeason = parseInt(m[1], 10);
+    if (s != null && matchSeason !== s) continue;
+    ranges.push({ season: matchSeason, lo: parseInt(m[2], 10), hi: parseInt(m[3], 10) });
+  }
+  for (const m of t.matchAll(/\bepisodes?\s*0*(\d{1,3})\s*[-~]\s*0*(\d{1,3})\b/gi)) {
+    ranges.push({ season: s, lo: parseInt(m[1], 10), hi: parseInt(m[2], 10) });
+  }
+  return ranges;
+}
+
+function hasAnyEpisodeMarker(title) {
+  return /\bs\d{1,2}\s*e\d{1,3}\b|\b\d{1,2}x\d{1,3}\b|\bepisodes?\s*\d{1,3}\b|\bep\s*\d{1,3}\b/i.test(String(title || ""));
+}
+
+function episodeMatchRank(title, season, episode) {
+  if (season == null || episode == null) return 1;
+  const t    = (title || "").toLowerCase();
+  const sRaw = parseInt(season, 10);
+  const eRaw = parseInt(episode, 10);
+
+  if (new RegExp(`\\bs0*${sRaw}[\\s._-]*e0*${eRaw}\\b|\\b0*${sRaw}x0*${eRaw}\\b`, "i").test(t)) return 4;
+  for (const range of parseEpisodeRanges(t, sRaw)) {
+    if (eRaw >= range.lo && eRaw <= range.hi) return 3;
+  }
+  const seasonOnly = new RegExp(`\\bs0*${sRaw}\\b|\\bseason\\s?0*${sRaw}\\b|\\btemporada\\s?0*${sRaw}\\b`, "i");
+  if (seasonOnly.test(t) && !hasAnyEpisodeMarker(t)) return 2;
+  if (isCompletePack(t)) {
+    return seasonOnly.test(t) ? 1 : 0;
+  }
+  return 0;
+}
+
+function animeEpisodeMatchRank(title, ep) {
+  if (ep == null) return 1;
+  const t = (title || "").replace(/\./g, " ");
+  const n = ep;
+
+  if (new RegExp(`-\\s*0*${n}(?:v\\d+)?\\s*[\\[\\(\\s]`, "i").test(t)) return 3;
+  if (new RegExp(`\\[0*${n}(?:v\\d+)?\\]`, "i").test(t)) return 3;
+  if (new RegExp(`(?<=[\\s._\-\\[\\(])0*${String(n).padStart(2, "0")}(?:v\\d+)?(?=[\\s._\-\\]\\)\\[]|$)`, "i").test(t)) return 3;
+  if (new RegExp(`(?<=[\\s._\-\\[\\(])0*${String(n).padStart(3, "0")}(?:v\\d+)?(?=[\\s._\-\\]\\)\\[]|$)`, "i").test(t)) return 3;
+  if (new RegExp(`\\bE(?:p(?:isode)?)?\\s*0*${n}\\b`, "i").test(t)) return 3;
+
+  for (const m of t.matchAll(/\b(\d{1,3})\s*[-~]\s*(\d{1,3})\b/g)) {
+    const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
+    if (n >= lo && n <= hi) return 2;
+  }
+
+  if (isCompletePack(t)) return 1;
+  return 0;
+}
 // ─────────────────────────────────────────────────────────
 // FILTRO ESTRITO DE EPISÓDIOS
 // ─────────────────────────────────────────────────────────
 function seriesEpisodeMatches(title, season, episode) {
-  if (season == null || episode == null) return true;
-  const t    = (title || "").toLowerCase();
-  const sRaw = parseInt(season,  10);
-  const eRaw = parseInt(episode, 10);
-  if (new RegExp(`\\bs0*${sRaw}[\\s.-_]?e0*${eRaw}\\b|\\b0*${sRaw}x0*${eRaw}\\b`, 'i').test(t)) return true;
-  if (new RegExp(`\\bs0*${sRaw}\\b(?!\\s?[.-_]?e\\d)|\\bseason\\s?0*${sRaw}\\b|\\btemporada\\s?0*${sRaw}\\b`, 'i').test(t)) return true;
-  const mm = t.match(/s0*(\d{1,2})\s*[-~]\s*s?0*(\d{1,2})/i);
-  if (mm && sRaw >= parseInt(mm[1],10) && sRaw <= parseInt(mm[2],10)) return true;
-  if (/\b(complete|completa|todas as temporadas|series pack)\b/i.test(t)) return true;
-  return false;
+  return episodeMatchRank(title, season, episode) > 0;
 }
 function animeEpisodeMatches(title, ep) {
-  if (ep == null) return true;
-  const t = (title || "").replace(/\./g, " ");
-  const n = ep;
-  for (const m of t.matchAll(/\b(\d{1,3})\s*[-~]\s*(\d{1,3})\b/g)) {
-    const lo = parseInt(m[1], 10), hi = parseInt(m[2], 10);
-    if (n >= lo && n <= hi) return true;
-  }
-  const pad2 = String(n).padStart(2, "0");
-  const pad3 = String(n).padStart(3, "0");
-  if (new RegExp(`-\\s*0*${n}(?:v\\d+)?\\s*[\\[\\(\\s]`, "i").test(t)) return true;
-  for (const v of [pad2, pad3, String(n)]) {
-    if (new RegExp(`\\[0*${n}(?:v\\d+)?\\]`).test(t)) return true;
-    if (new RegExp(`(?<=[\\s\\._\\-\\[\\(])0*${v}(?:v\\d+)?(?=[\\s\\._\\-\\]\\)\\[]|$)`, "i").test(t)) return true;
-  }
-  if (new RegExp(`\\bE(?:p(?:isode)?)?\\s*0*${n}\\b`, "i").test(t)) return true;
-  if (new RegExp(`(?:^|[\\s\\[\\(\\-_])0*${n}(?:v\\d+)?(?=[\\s\\]\\)\\[\\-_]|$)`).test(t)) return true;
-  return false;
+  return animeEpisodeMatchRank(title, ep) > 0;
 }
 // ─────────────────────────────────────────────────────────
 // DEDUPLICAÇÃO
@@ -352,9 +476,100 @@ function extractInfoBuf(buf) {
   }
   return depth === 0 ? buf.slice(start, i) : null;
 }
+
+function decodeBencode(buf) {
+  let i = 0;
+  const parse = () => {
+    const c = String.fromCharCode(buf[i]);
+    if (c === "i") {
+      const end = buf.indexOf(0x65, i + 1);
+      const num = parseInt(buf.toString("utf8", i + 1, end), 10);
+      i = end + 1;
+      return num;
+    }
+    if (c === "l") {
+      i++;
+      const out = [];
+      while (buf[i] !== 0x65) out.push(parse());
+      i++;
+      return out;
+    }
+    if (c === "d") {
+      i++;
+      const out = {};
+      while (buf[i] !== 0x65) {
+        const key = parse();
+        out[String(key)] = parse();
+      }
+      i++;
+      return out;
+    }
+    let colon = i;
+    while (buf[colon] !== 0x3a) colon++;
+    const len = parseInt(buf.toString("utf8", i, colon), 10);
+    const start = colon + 1;
+    const end = start + len;
+    const out = buf.toString("utf8", start, end);
+    i = end;
+    return out;
+  };
+  return parse();
+}
+
+function extractTorrentFiles(buf) {
+  try {
+    const meta = decodeBencode(buf);
+    const info = meta?.info;
+    if (!info) return [];
+    if (Array.isArray(info.files)) {
+      return info.files.map((file, idx) => ({
+        idx,
+        name: Array.isArray(file.path) ? file.path.join("/") : String(file.path || info.name || ""),
+        size: Number(file.length) || 0,
+      }));
+    }
+    if (info.name) {
+      return [{ idx: 0, name: String(info.name), size: Number(info.length) || 0 }];
+    }
+  } catch {}
+  return [];
+}
+
+function pickEpisodeFile(files, season, episode, isAnime) {
+  if (!Array.isArray(files) || !files.length || episode == null) return null;
+  const scored = files.map(file => {
+    const name = file.name || "";
+    const rank = isAnime
+      ? animeEpisodeMatchRank(name, episode)
+      : episodeMatchRank(name, season, episode);
+    const videoBonus = /\.(mkv|mp4|avi|ts|m2ts|mov|wmv)$/i.test(name) ? 5 : 0;
+    return { ...file, rank, total: rank * 1000 + videoBonus + Math.min(file.size || 0, 50 * 1e9) / 1e9 };
+  }).filter(file => file.rank > 0);
+
+  if (!scored.length) return null;
+  scored.sort((a, b) => b.total - a.total);
+  return scored[0];
+}
+
+function relaxedTitleMatchScore(title, aliases = []) {
+  const titleTokens = new Set(normalizeTitleTokens(title));
+  let best = 0;
+  for (const alias of aliases.filter(Boolean)) {
+    const aliasTokens = normalizeTitleTokens(alias);
+    if (!aliasTokens.length) continue;
+    const matched = aliasTokens.filter(tok => titleTokens.has(tok)).length;
+    if (!matched) continue;
+    best = Math.max(best, matched / aliasTokens.length);
+  }
+  return best;
+}
+
 async function resolveInfoHash(r) {
-  if (r.InfoHash)  return r.InfoHash.toLowerCase();
-  if (r.MagnetUri) { const h = extractInfoHash(r.MagnetUri); if (h) return h; }
+  if (r.InfoHash)  return { infoHash: r.InfoHash.toLowerCase(), files: null };
+  if (r.MagnetUri) {
+    const h = extractInfoHash(r.MagnetUri);
+    if (h) return { infoHash: h, files: null };
+  }
   if (!r.Link)     return null;
   try {
     const res = await axios.get(r.Link, {
@@ -363,13 +578,24 @@ async function resolveInfoHash(r) {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
     });
     const finalUrl = res.request?.res?.responseUrl || "";
-    if (finalUrl.startsWith("magnet:")) return extractInfoHash(finalUrl);
+    if (finalUrl.startsWith("magnet:")) {
+      const infoHash = extractInfoHash(finalUrl);
+      return infoHash ? { infoHash, files: null } : null;
+    }
     const buf     = Buffer.from(res.data);
     const bodyStr = buf.toString("utf8", 0, Math.min(buf.length, 200));
-    if (bodyStr.trimStart().startsWith("magnet:")) return extractInfoHash(bodyStr.trim());
+    if (bodyStr.trimStart().startsWith("magnet:")) {
+      const infoHash = extractInfoHash(bodyStr.trim());
+      return infoHash ? { infoHash, files: null } : null;
+    }
     if (buf[0] === 0x64) {
       const infoBuf = extractInfoBuf(buf);
-      if (infoBuf) return crypto.createHash("sha1").update(infoBuf).digest("hex");
+      if (infoBuf) {
+        return {
+          infoHash: crypto.createHash("sha1").update(infoBuf).digest("hex"),
+          files: extractTorrentFiles(buf),
+        };
+      }
     }
   } catch {}
   return null;
@@ -442,6 +668,112 @@ async function jackettFetchIndexers() {
   } catch {}
   return [];
 }
+
+function decodeXmlEntities(str = "") {
+  return str
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+
+function xmlTagValue(xml, tag) {
+  const m = xml.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return m ? decodeXmlEntities(m[1].trim()) : null;
+}
+
+function parseTorznabResults(xml, indexer) {
+  const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
+  return items.map(item => {
+    const attrs = {};
+    for (const m of item.matchAll(/<(?:torznab:)?attr\s+name="([^"]+)"\s+value="([^"]*)"\s*\/?/gi))
+      attrs[m[1].toLowerCase()] = decodeXmlEntities(m[2]);
+
+    const enclosure = item.match(/<enclosure\b[^>]*url="([^"]+)"[^>]*length="([^"]*)"/i);
+    const magnetUri = attrs.magneturl || null;
+    const link = magnetUri ? magnetUri : (xmlTagValue(item, "link") || enclosure?.[1] || null);
+    const size = attrs.size ? parseInt(attrs.size, 10) : (enclosure?.[2] ? parseInt(enclosure[2], 10) : 0);
+    const seeders = attrs.seeders ? parseInt(attrs.seeders, 10) : 0;
+
+    return {
+      Title: xmlTagValue(item, "title") || "",
+      Guid: xmlTagValue(item, "guid") || link || magnetUri || "",
+      Link: link,
+      MagnetUri: magnetUri,
+      Size: Number.isFinite(size) ? size : 0,
+      Seeders: Number.isFinite(seeders) ? seeders : 0,
+      InfoHash: attrs.infohash ? attrs.infohash.toLowerCase() : null,
+      Tracker: indexer,
+      TrackerId: indexer,
+      ImdbId: normalizeImdbId(attrs.imdbid || attrs.imdb || attrs.imdbidnum || attrs.imdbnum),
+      PublishDate: xmlTagValue(item, "pubDate") || null,
+      _structuredMatch: true,
+    };
+  }).filter(r => r.Title && (r.Link || r.MagnetUri || r.Guid));
+}
+
+async function jackettTextSearch(query, indexer, timeout) {
+  const res = await axios.get(
+    `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results`,
+    { params: qp({ Query: query }), timeout, validateStatus: () => true }
+  );
+  if (res.status === 429) throw Object.assign(new Error("Rate limited"), { response: res });
+  if (res.status >= 400) throw new Error(`HTTP ${res.status}`);
+  return (res.data?.Results || []).map(r => ({ ...r, _structuredMatch: false }));
+}
+
+async function jackettStructuredSearch(search, indexer, timeout) {
+  if (!search?.mode || !search?.imdbId) return [];
+  const params = { apikey: ENV.apiKey, t: search.mode, imdbid: search.imdbId, q: search.title };
+  if (search.year)   params.year = search.year;
+  if (search.season != null) params.season = search.season;
+  if (search.episode != null) params.ep = search.episode;
+
+  const res = await axios.get(
+    `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results/torznab/api`,
+    { params, timeout, responseType: "text", validateStatus: () => true }
+  );
+  if (res.status === 429) throw Object.assign(new Error("Rate limited"), { response: res });
+  if (res.status >= 400) throw new Error(`HTTP ${res.status}`);
+  return parseTorznabResults(String(res.data || ""), indexer);
+}
+
+async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout) {
+  if (await isRateLimited(indexer)) return [];
+  const t0 = Date.now();
+  try {
+    let results = [];
+    if (plan.search && !plan.parsed?.isAnime) {
+      try {
+        results = await jackettStructuredSearch(plan.search, indexer, timeout);
+      } catch (err) {
+        if (err.response?.status === 429) throw err;
+      }
+    }
+    if (results.length === 0) {
+      for (const query of plan.queries) {
+        const textResults = await jackettTextSearch(query, indexer, timeout);
+        results.push(...textResults);
+        if (results.length > 0) break;
+      }
+    }
+    const ms = Date.now() - t0;
+    await trackMetrics(indexer, ms, results.length, true);
+    const mode = results.some(r => r._structuredMatch) ? "estruturado" : "texto";
+    console.log(`  ${indexer}: ${results.length} resultados (${ms}ms, ${mode})`);
+    return results;
+  } catch (err) {
+    const ms = Date.now() - t0;
+    if (err.response?.status === 429) await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
+    if (err.code === "ECONNABORTED" && timeout === fastTimeout)
+      console.log(`  ${indexer}: timeout lento de ${ms}ms (indo para background)`);
+    return [];
+  }
+}
+
 async function trackMetrics(indexer, ms, count, ok) {
   const key = `metrics:${indexer}`;
   const raw = await rc.get(key);
@@ -454,9 +786,9 @@ async function trackMetrics(indexer, ms, count, ok) {
   m.lastCall    = new Date().toISOString();
   await rc.set(key, JSON.stringify(m), 86400);
 }
-async function jackettSearch(queries, indexers, prefs) {
-  const queryList = uniq(Array.isArray(queries) ? queries : [queries]);
-  const cacheKey  = `search:${CACHE_VERSION}:${queryList.join("||")}:${indexers.join(",")}`;
+async function jackettSearch(plan, indexers, prefs) {
+  const queryList = uniq(Array.isArray(plan?.queries) ? plan.queries : [plan?.queries].filter(Boolean));
+  const cacheKey  = `search:${CACHE_VERSION}:${Buffer.from(JSON.stringify({ queryList, search: plan?.search || null, parsed: plan?.parsed || null })).toString("base64")}:${indexers.join(",")}`;
   const cached    = await rc.get(cacheKey);
   if (cached) {
     console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
@@ -465,43 +797,15 @@ async function jackettSearch(queries, indexers, prefs) {
   // FIX: slowThreshold do usuário como timeout da fase rápida.
   const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 12000);
   const SLOW_TIMEOUT = 50000;
-  const tasks = [];
-  for (const query of queryList) {
-    console.log(`Jackett iniciando busca: "${query}" em [${indexers.length} indexers]`);
-    for (const indexer of indexers) tasks.push({ query, indexer });
-  }
-  const fetchIndexer = async (task, timeout) => {
-    const { query, indexer } = task;
-    if (await isRateLimited(indexer)) return [];
-    const t0 = Date.now();
-    try {
-      const res = await axios.get(
-        `${ENV.jackettUrl}/api/v2.0/indexers/${indexer}/results`,
-        { params: qp({ Query: query }), timeout, validateStatus: () => true }
-      );
-      const ms = Date.now() - t0;
-      if (res.status === 429) { await setRateLimit(indexer, res.headers?.["retry-after"]); return []; }
-      if (res.status >= 400)  { console.log(`  ${indexer}: Erro HTTP ${res.status} (${ms}ms)`); return []; }
-      const results = res.data?.Results || [];
-      await trackMetrics(indexer, ms, results.length, true);
-      console.log(`  ${indexer}: ${results.length} resultados (${ms}ms)`);
-      return results;
-    } catch (err) {
-      const ms = Date.now() - t0;
-      if (err.response?.status === 429) await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
-      if (err.code === 'ECONNABORTED' && timeout === FAST_TIMEOUT)
-        console.log(`  ${indexer}: timeout lento de ${ms}ms (indo para background)`);
-      return [];
-    }
-  };
+  console.log(`Jackett iniciando busca: "${queryList[0] || plan?.search?.title || "sem titulo"}" em [${indexers.length} indexers]`);
   console.log(`Fase rapida: aguardando respostas... (${FAST_TIMEOUT}ms max)`);
-  const fastFlat    = (await Promise.all(tasks.map(t => fetchIndexer(t, FAST_TIMEOUT)))).flat();
+  const fastFlat    = (await Promise.all(indexers.map(indexer => jackettSearchOneIndexer(indexer, plan, FAST_TIMEOUT, FAST_TIMEOUT)))).flat();
   const fastDeduped = dedupeResults(fastFlat);
   console.log(`Conclusao da janela rapida: ${fastFlat.length} brutos -> ${fastDeduped.length} deduplicados`);
   if (fastDeduped.length === 0) { await rc.set(cacheKey, JSON.stringify([]), 300); return []; }
   setImmediate(async () => {
     try {
-      const slowDeduped = dedupeResults((await Promise.all(tasks.map(t => fetchIndexer(t, SLOW_TIMEOUT)))).flat());
+      const slowDeduped = dedupeResults((await Promise.all(indexers.map(indexer => jackettSearchOneIndexer(indexer, plan, SLOW_TIMEOUT, FAST_TIMEOUT)))).flat());
       if (slowDeduped.length > fastDeduped.length) {
         console.log(`[Background] Cache atualizado: ${fastDeduped.length} -> ${slowDeduped.length}`);
         await rc.set(cacheKey, JSON.stringify(slowDeduped), 1800);
@@ -530,12 +834,14 @@ async function getCinemetaTitle(type, imdbId) {
       (genres.includes("animation") && (country.includes("japan") || country.includes("jp"))) ||
       (genres.includes("animation") && (lang.includes("japanese") || lang.includes("japan") || lang === "ja"));
     return {
-      title  : meta?.name || imdbId,
-      aliases: uniq([meta?.name, meta?.originalName, ...(meta?.aliases || [])]).map(normTitle),
+      title   : meta?.name || imdbId,
+      aliases : uniq([meta?.name, meta?.originalName, ...(meta?.aliases || [])]).map(normTitle),
+      imdbId  : meta?.imdb_id || meta?.id || imdbId,
+      year    : extractReleaseYear(meta?.year || meta?.releaseInfo || meta?.released || ""),
       isAnime,
     };
   } catch {
-    return { title: imdbId, aliases: [normTitle(imdbId)], isAnime: false };
+    return { title: imdbId, aliases: [normTitle(imdbId)], imdbId, year: null, isAnime: false };
   }
 }
 async function getKitsuMeta(kitsuId) {
@@ -589,7 +895,15 @@ async function buildQueries(type, id) {
           `${t} ${ep}`,
         ]))
       : uniq(meta.aliases);
-    return { parsed, displayTitle: meta.title, queries, episode: ep };
+    return {
+      parsed,
+      displayTitle: meta.title,
+      aliases: meta.aliases,
+      queries,
+      episode: ep,
+      search: null,
+      year: null,
+    };
   }
   const meta = await getCinemetaTitle(type, parsed.metaId);
   if (meta.isAnime) {
@@ -618,8 +932,18 @@ async function buildQueries(type, id) {
   return {
     parsed,
     displayTitle: meta.title,
+    aliases     : meta.aliases,
     queries     : uniq(queries.map(normTitle)),
     episode,
+    year        : meta.year,
+    search      : parsed.isAnime ? null : {
+      mode   : type === "movie" ? "movie" : "tvsearch",
+      imdbId : meta.imdbId,
+      title  : meta.title,
+      year   : meta.year,
+      season : parsed.season,
+      episode: parsed.episode,
+    },
   };
 }
 // ─────────────────────────────────────────────────────────
@@ -706,7 +1030,8 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   }
   // ── Busca principal ───────────────────────────────────────────────────────
   try {
-    const { parsed, displayTitle, queries, episode } = await buildQueries(type, id);
+    const { parsed, displayTitle, aliases = [], queries, episode, year, search } = await buildQueries(type, id);
+    const requestedImdbId = normalizeImdbId(search?.imdbId || parsed?.metaId);
 
     // Verificação de categorias habilitadas
     const enabledCats = Array.isArray(prefs.categories) && prefs.categories.length
@@ -729,16 +1054,25 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     }
 
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
-    const results  = await jackettSearch(queries, indexers, prefs);
+    const results  = await jackettSearch({ parsed, queries, search }, indexers, prefs);
 
     // Idioma prioritário — determina o bônus no score e o alvo do filtro estrito.
     // Vazio = sem preferência de idioma (ranking por qualidade/seeders apenas).
     const priorityLang = prefs.priorityLang ?? "pt-br";
 
     let rejectedBySeriesFilter = 0;
+    let rejectedByTitleMatch   = 0;
+    let rejectedByYear         = 0;
+    let rejectedByMovieShape   = 0;
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
       .filter(r => !prefs.skipBadReleases || !BAD_RE.test(r.Title || ""))
+      .filter(r => {
+        if (type !== "movie") return true;
+        const ok = !looksLikeEpisodeRelease(r.Title || "");
+        if (!ok) rejectedByMovieShape++;
+        return ok;
+      })
       .filter(r => {
         if (parsed.isAnime) return animeEpisodeMatches(r.Title || "", episode);
         if (type === "series") {
@@ -756,19 +1090,64 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         if (!priorityLang)     return true; // sem lang definida = sem filtro
         return getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang);
       })
+      .filter(r => {
+        const resultImdbId = getResultImdbId(r);
+        if (requestedImdbId && resultImdbId && resultImdbId === requestedImdbId) {
+          r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
+          r._metaIdMatch = true;
+          return true;
+        }
+        const score = titleMatchScore(r.Title || "", [displayTitle, ...aliases]);
+        const relaxedScore = relaxedTitleMatchScore(r.Title || "", [displayTitle, ...aliases]);
+        const episodeRank = parsed.isAnime
+          ? animeEpisodeMatchRank(r.Title || "", episode)
+          : episodeMatchRank(r.Title || "", parsed.season, parsed.episode);
+        const minScore = parsed.isAnime ? 0.34 : (type === "series" && episodeRank >= 2 ? 0.2 : 0.45);
+        const finalScore = Math.max(score, type === "series" ? relaxedScore * 0.8 : 0);
+        const ok = finalScore >= minScore;
+        if (!ok) rejectedByTitleMatch++;
+        r._titleMatchScore = finalScore;
+        return ok;
+      })
+      .filter(r => {
+        if (type !== "movie" || !year) return true;
+        const releaseYear = extractReleaseYear(r.Title || "");
+        if (!releaseYear) return true;
+        const ok = releaseYear === year;
+        if (!ok) rejectedByYear++;
+        return ok;
+      })
       // FIX PRINCIPAL: score() agora recebe priorityLang.
       // Quando priorityLang="" : todos os idiomas pontuam igual — não-dublados
       //                          aparecem normalmente, ordenados por qualidade.
       // Quando priorityLang set: idioma selecionado aparece no topo, mas os
       //                          demais ainda aparecem abaixo (sem exclusão).
       .sort((a, b) =>
-        score(b, prefs.weights, parsed.isAnime, priorityLang) -
-        score(a, prefs.weights, parsed.isAnime, priorityLang)
+        (((b._metaIdMatch ? 1 : 0) * 40000) +
+          ((b._structuredMatch ? 1 : 0) * 20000) +
+          (parsed.isAnime
+          ? animeEpisodeMatchRank(b.Title || "", episode)
+          : episodeMatchRank(b.Title || "", parsed.season, parsed.episode)) * 10000 +
+          (b._titleMatchScore || 0) * 1000 +
+          score(b, prefs.weights, parsed.isAnime, priorityLang)) -
+        (((a._metaIdMatch ? 1 : 0) * 40000) +
+          ((a._structuredMatch ? 1 : 0) * 20000) +
+          (parsed.isAnime
+          ? animeEpisodeMatchRank(a.Title || "", episode)
+          : episodeMatchRank(a.Title || "", parsed.season, parsed.episode)) * 10000 +
+          (a._titleMatchScore || 0) * 1000 +
+          score(a, prefs.weights, parsed.isAnime, priorityLang))
       );
     // Nota: .slice() aplicado APÓS resolveInfoHash (fix Bug 2 anterior).
 
     if (type === "series" && rejectedBySeriesFilter > 0)
       console.log(`Filtro de Serie: ${rejectedBySeriesFilter} resultados descartados.`);
+    if (rejectedByTitleMatch > 0)
+      console.log(`Filtro de Titulo: ${rejectedByTitleMatch} resultados descartados.`);
+    if (rejectedByYear > 0)
+      console.log(`Filtro de Ano: ${rejectedByYear} resultados descartados.`);
+    if (rejectedByMovieShape > 0)
+      console.log(`Filtro de Filme: ${rejectedByMovieShape} resultados episodicos descartados.`);
 
     const langLabel = priorityLang
       ? `Idioma prioritário: ${priorityLang.toUpperCase()}`
@@ -778,20 +1157,31 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
     const resolvedAll = await Promise.all(
       candidates.map(async r => {
-        const infoHash = await resolveInfoHash(r);
-        if (!infoHash) {
+        const resolved = await resolveInfoHash(r);
+        if (!resolved?.infoHash) {
           console.log(`  Erro ou torrent vazio em "${(r.Title||"").slice(0,60)}"`);
           return null;
         }
+        const matchedFile = (type === "series" || parsed.isAnime)
+          ? pickEpisodeFile(resolved.files, parsed.season, parsed.episode ?? episode, parsed.isAnime)
+          : null;
         const indexerName            = r.Tracker || r.TrackerId || "Unknown";
         const { name, description }  = formatStream(r, indexerName, parsed.isAnime, prefs);
         const sources                = r.MagnetUri ? [r.MagnetUri] : [];
         return {
-          name, description, infoHash, sources,
+          name,
+          description: matchedFile?.name
+            ? `${description}\n📂 ${matchedFile.name}`
+            : description,
+          infoHash: resolved.infoHash,
+          fileIdx: matchedFile?.idx,
+          sources,
           behaviorHints: {
+            filename: matchedFile?.name,
+            videoSize: matchedFile?.size,
             bingeGroup: parsed.isAnime
               ? `prowjack|anime|${displayTitle}`
-              : `prowjack|${infoHash}`,
+              : `prowjack|${resolved.infoHash}`,
           },
         };
       })
