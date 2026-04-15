@@ -8,310 +8,352 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet" />
 <style>
 :root{
-  --bg:#0b0c0f;--sur:#111318;--bord:#1e2230;--bord2:#2a3048;
-  --amber:#f5a623;--amber2:#e8890a;--adim:#7a500e;
-  --green:#2dce6c;--red:#e05050;--text:#c8cfe8;--dim:#5a6280;
+  --bg:#0a0e17;--sur:#12161f;--bord:#1e2433;--bord2:#2a3040;
+  --accent:#7c9aff;--accent-dim:#3a4a7a;--accent-glow:rgba(124,154,255,.18);
+  --green:#4ae89e;--red:#ff6b6b;--text:#e4e8f5;--dim:#5a6488;--muted:#1a1f2e;
+  --tb:#ff9d5c;--tb-dim:#8a4a1e;--tb-bg:rgba(255,157,92,.09);
+  --rd:#c88aff;--rd-dim:#6a3ea9;--rd-bg:rgba(200,138,255,.09);
+  --dual:#4ae89e;--dual-bg:rgba(74,232,158,.08);
   --mono:'Space Mono',monospace;--sans:'Barlow Condensed',sans-serif;
+  --radius:8px;--shadow:0 4px 20px rgba(0,0,0,.3);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh}
-body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.05) 2px,rgba(0,0,0,.05) 4px);pointer-events:none;z-index:9999}
+body{background:linear-gradient(135deg,#0a0e17 0%,#0d1220 100%);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh;display:flex;flex-direction:column;align-items:center;position:relative}
+body::before{content:'';position:fixed;top:0;left:0;right:0;height:300px;background:radial-gradient(ellipse at top,rgba(124,154,255,.08),transparent);pointer-events:none;z-index:0}
 
-header{display:flex;align-items:center;justify-content:space-between;padding:18px 28px;border-bottom:1px solid var(--bord);position:sticky;top:0;background:rgba(11,12,15,.96);backdrop-filter:blur(8px);z-index:100}
-.logo-wrap{display:flex;align-items:baseline;gap:10px}
-.logo-name{font-family:var(--sans);font-weight:900;font-size:24px;letter-spacing:2px;color:#fff;text-transform:uppercase}
-.logo-v{font-size:10px;color:var(--amber);background:rgba(245,166,35,.12);border:1px solid var(--adim);padding:2px 7px;border-radius:2px}
-.logo-sub{font-family:var(--sans);font-size:12px;font-weight:300;color:var(--dim);letter-spacing:3px;text-transform:uppercase}
-.status-row{display:flex;align-items:center;gap:16px;font-size:11px;color:var(--dim)}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:5px}
-.dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
-.dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
-.dot.wait{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+header{width:100%;max-width:900px;display:flex;align-items:center;justify-content:space-between;padding:24px 28px;border-bottom:1px solid var(--bord);backdrop-filter:blur(10px);background:rgba(18,22,31,.6);position:relative;z-index:1;margin-bottom:8px}
+.logo-wrap{display:flex;flex-direction:column;gap:4px}
+.logo-name{font-family:var(--sans);font-weight:900;font-size:24px;letter-spacing:4px;color:#fff;text-transform:uppercase;text-shadow:0 0 20px rgba(124,154,255,.4)}
+.logo-v{font-size:9px;color:var(--accent);background:var(--accent-glow);border:1px solid var(--accent-dim);padding:3px 8px;border-radius:4px;margin-left:10px;vertical-align:middle;font-weight:700;box-shadow:0 0 10px var(--accent-glow)}
+.logo-sub{font-family:var(--sans);font-size:11px;font-weight:300;color:var(--dim);letter-spacing:3px;text-transform:uppercase;opacity:.8}
+.status-row{display:flex;align-items:center;gap:14px;font-size:11px;color:var(--dim);background:var(--muted);padding:8px 14px;border-radius:var(--radius);border:1px solid var(--bord)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:6px;flex-shrink:0;transition:.3s}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green),0 0 3px var(--green) inset}
+.dot.err{background:var(--red);box-shadow:0 0 8px var(--red),0 0 3px var(--red) inset}
+.dot.wait{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.4s ease-in-out infinite}
 
-.tabs{display:flex;padding:0 28px;border-bottom:1px solid var(--bord)}
-.tab{padding:13px 18px;font-family:var(--sans);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:.2s}
-.tab:hover{color:var(--text)}
-.tab.active{color:var(--amber);border-bottom-color:var(--amber)}
+nav.tabs{width:100%;max-width:900px;display:flex;padding:0 28px;border-bottom:1px solid var(--bord);position:relative;z-index:1;background:rgba(18,22,31,.4);backdrop-filter:blur(8px)}
+.tab{padding:14px 20px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-1px;transition:all .3s ease;position:relative}
+.tab::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%) scaleX(0);width:80%;height:3px;background:linear-gradient(90deg,transparent,var(--accent),transparent);border-radius:2px 2px 0 0;transition:transform .3s ease;opacity:0}
+.tab:hover{color:var(--text);transform:translateY(-2px)}
+.tab.active{color:var(--accent)}
+.tab.active::before{transform:translateX(-50%) scaleX(1);opacity:1}
 
-.pane{display:none;padding:28px}
+.pane{display:none;padding:28px 24px;width:100%;max-width:900px}
 .pane.active{display:block}
 
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:1080px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .g2 .full{grid-column:1/-1}
 @media(max-width:680px){.g2{grid-template-columns:1fr}}
 
-.card{background:var(--sur);border:1px solid var(--bord);border-radius:4px;padding:20px}
-.ctitle{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:16px;display:flex;align-items:center;gap:8px}
-.ctitle::before{content:'▶';font-size:8px;opacity:.5}
+.card{background:var(--sur);border:1px solid var(--bord);border-radius:var(--radius);padding:20px}
+.ctitle{font-family:var(--sans);font-weight:700;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.ctitle::before{content:'';width:3px;height:12px;background:var(--accent);border-radius:2px;display:inline-block}
 
-.env-box{background:#060709;border:1px solid var(--bord2);border-radius:3px;padding:12px 14px;margin-bottom:14px;font-size:11px;line-height:2}
+.env-box{background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;font-size:11px;line-height:2.2}
 .env-row{display:flex;gap:12px;align-items:center}
-.env-key{color:var(--dim);min-width:90px;letter-spacing:1px;text-transform:uppercase;font-size:10px}
-.env-val{color:var(--green);font-family:var(--mono)}
+.env-key{color:var(--dim);min-width:80px;letter-spacing:1px;text-transform:uppercase;font-size:10px}
+.env-val{color:var(--green)}
 .env-val.err{color:var(--red)}
 
 label{display:block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
-input[type=text],input[type=number],select.ix-select{width:100%;background:#080910;border:1px solid var(--bord2);color:var(--text);padding:9px 12px;font-family:var(--mono);font-size:12px;border-radius:3px;outline:none;margin-bottom:14px;transition:.15s}
-input:focus,select.ix-select:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.1)}
+input[type=text],input[type=number],input[type=password],select.ix-select{width:100%;background:var(--bg);border:1px solid var(--bord2);color:var(--text);padding:9px 12px;font-family:var(--mono);font-size:12px;border-radius:var(--radius);outline:none;margin-bottom:14px;transition:.15s}
+input:focus,select.ix-select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
 
 .w-row{display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:10px;margin-bottom:10px}
-.w-label{font-size:11px;letter-spacing:1px;text-transform:uppercase}
-.w-val{font-family:var(--mono);font-size:13px;color:var(--amber);text-align:right}
-input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;background:var(--bord2);border-radius:2px;outline:none;cursor:pointer}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--amber);border-radius:50%;cursor:pointer;transition:.15s}
-input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px var(--amber)}
+.w-label{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+.w-val{font-family:var(--mono);font-size:13px;color:var(--accent);text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:2px;background:var(--bord2);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;background:var(--accent);border-radius:50%;cursor:pointer;transition:.15s}
+input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px var(--accent)}
 
 .ix-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .ix-search{flex:1;min-width:160px;max-width:260px;margin:0!important;padding:7px 10px!important}
-.ix-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px;max-height:360px;overflow-y:auto}
+.ix-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;max-height:340px;overflow-y:auto}
 .ix-grid::-webkit-scrollbar{width:3px}
 .ix-grid::-webkit-scrollbar-thumb{background:var(--bord2);border-radius:2px}
-.ix-item{display:flex;align-items:center;gap:8px;background:#080910;border:1px solid var(--bord);border-radius:3px;padding:8px 10px;cursor:pointer;transition:.15s;user-select:none}
+.ix-item{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--bord);border-radius:var(--radius);padding:8px 10px;cursor:pointer;transition:.15s;user-select:none}
 .ix-item:hover{border-color:var(--bord2)}
-.ix-item.on{border-color:var(--adim);background:rgba(245,166,35,.06)}
-.ix-item input[type=checkbox]{accent-color:var(--amber);cursor:pointer;flex-shrink:0}
+.ix-item.on{border-color:var(--accent-dim);background:var(--accent-glow)}
+.ix-item input[type=checkbox]{accent-color:var(--accent);cursor:pointer;flex-shrink:0}
 .ix-item span{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ix-empty{padding:40px;text-align:center;color:var(--dim);font-size:12px}
 
-.tg-group{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
-.tg{padding:6px 14px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--bord2);background:transparent;color:var(--dim);border-radius:2px;cursor:pointer;transition:.15s}
-.tg:hover{border-color:var(--adim);color:var(--text)}
-.tg.on{border-color:var(--amber);background:rgba(245,166,35,.12);color:var(--amber)}
+.tg-group{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tg{padding:6px 14px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--bord2);background:transparent;color:var(--dim);border-radius:var(--radius);cursor:pointer;transition:.15s}
+.tg:hover{border-color:var(--accent-dim);color:var(--text)}
+.tg.on{border-color:var(--accent);background:var(--accent-glow);color:var(--accent)}
 
-.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;font-family:var(--sans);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;border:none;border-radius:3px;cursor:pointer;transition:.15s;text-decoration:none}
-.btn-p{background:var(--amber);color:#000}
-.btn-p:hover{background:#fff;box-shadow:0 0 18px rgba(245,166,35,.4)}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:none;border-radius:var(--radius);cursor:pointer;transition:.15s;text-decoration:none}
+.btn-p{background:var(--accent);color:#fff}
+.btn-p:hover{background:#8aa4ff;box-shadow:0 0 16px var(--accent-glow)}
 .btn-s{background:transparent;border:1px solid var(--bord2);color:var(--dim)}
-.btn-s:hover{border-color:var(--adim);color:var(--text)}
-.btn-d{background:transparent;border:1px solid rgba(224,80,80,.3);color:var(--red);font-size:10px;padding:3px 9px}
-.btn-d:hover{border-color:var(--red);background:rgba(224,80,80,.1)}
+.btn-s:hover{border-color:var(--accent-dim);color:var(--text)}
+.btn-d{background:transparent;border:1px solid rgba(240,96,96,.3);color:var(--red);font-size:10px;padding:3px 9px}
+.btn-d:hover{border-color:var(--red);background:rgba(240,96,96,.1)}
 .btn-sm{padding:5px 12px;font-size:10px}
+.btn-tb{background:var(--tb-bg);border:1px solid var(--tb-dim);color:var(--tb);font-size:10px;padding:5px 12px;letter-spacing:1px}
+.btn-tb:hover{background:rgba(255,140,66,.15);border-color:var(--tb);color:#fff}
+.btn-rd{background:var(--rd-bg);border:1px solid var(--rd-dim);color:var(--rd);font-size:10px;padding:5px 12px;letter-spacing:1px}
+.btn-rd:hover{background:rgba(176,122,255,.18);border-color:var(--rd);color:#fff}
 
-.ibox{margin-top:20px;background:#060709;border:1px solid var(--bord2);border-radius:4px;overflow:hidden}
-.ibox-head{background:rgba(245,166,35,.07);border-bottom:1px solid var(--bord2);padding:9px 14px;font-family:var(--sans);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--amber)}
-.ibox-url{padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.9}
+.ibox{margin-top:20px;background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);overflow:hidden}
+.ibox-head{background:var(--accent-glow);border-bottom:1px solid var(--bord2);padding:9px 14px;font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent)}
+.ibox-url{padding:14px;font-family:var(--mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.9}
 .ibox-url.empty{color:var(--dim);font-style:italic}
 .ibox-foot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--bord)}
 
-.anime-info{background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:3px;padding:10px 14px;margin-top:10px;font-size:11px;color:var(--amber);line-height:1.8}
+.anime-info{background:var(--accent-glow);border:1px solid var(--accent-dim);border-radius:var(--radius);padding:10px 14px;margin-top:10px;font-size:11px;color:var(--accent);line-height:1.8}
 
-/* ── Caixa de idioma prioritário ───────────────────────────────── */
-.lang-box{background:rgba(245,166,35,.04);border:1px solid var(--bord2);border-radius:3px;padding:12px 14px;margin-top:14px}
-.lang-box-title{font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+.lang-box{background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);padding:14px;margin-top:14px}
+.lang-box-title{font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
 .lang-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-bottom:10px}
-.lang-btn{display:flex;align-items:center;gap:7px;padding:7px 10px;background:#080910;border:1px solid var(--bord);border-radius:3px;cursor:pointer;transition:.15s;font-family:var(--mono);font-size:11px;color:var(--dim);user-select:none}
+.lang-btn{display:flex;align-items:center;gap:7px;padding:8px 10px;background:var(--sur);border:1px solid var(--bord);border-radius:var(--radius);cursor:pointer;transition:.15s;font-family:var(--mono);font-size:11px;color:var(--dim);user-select:none}
 .lang-btn:hover{border-color:var(--bord2);color:var(--text)}
-.lang-btn.selected{border-color:var(--amber);background:rgba(245,166,35,.08);color:var(--amber)}
+.lang-btn.selected{border-color:var(--accent);background:var(--accent-glow);color:var(--accent)}
 .lang-btn .flag{font-size:14px;flex-shrink:0}
 .lang-info{font-size:10px;color:var(--dim);line-height:1.7;margin-top:8px}
 .lang-info strong{color:var(--text)}
-/* ─────────────────────────────────────────────────────────────── */
 
-.metrics-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-.mc{background:var(--sur);border:1px solid var(--bord);border-radius:4px;padding:14px}
-.mc-name{font-family:var(--sans);font-weight:700;font-size:13px;color:#fff;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
-.mc-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px}
-.mk{color:var(--dim)}
-.mv{font-family:var(--mono)}
-.mv.ok{color:var(--green)} .mv.warn{color:var(--amber)} .mv.bad{color:var(--red)}
-.bar{margin-top:8px;height:3px;background:var(--bord2);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;background:var(--green);border-radius:2px;transition:width .5s}
-.empty{text-align:center;padding:50px;color:var(--dim);font-size:12px}
+.debrid-mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+@media(max-width:540px){.debrid-mode-grid{grid-template-columns:1fr}}
+.debrid-mode-btn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:14px 8px;background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);cursor:pointer;transition:.2s;user-select:none}
+.debrid-mode-btn:hover{border-color:var(--bord2);background:var(--muted)}
+.debrid-mode-btn.active-tb{border-color:var(--tb);background:var(--tb-bg);box-shadow:0 0 12px rgba(255,140,66,.12)}
+.debrid-mode-btn.active-rd{border-color:var(--rd);background:var(--rd-bg);box-shadow:0 0 12px rgba(176,122,255,.12)}
+.debrid-mode-btn.active-dual{border-color:var(--dual);background:var(--dual-bg);box-shadow:0 0 12px rgba(61,214,140,.1)}
+.debrid-mode-btn .dm-icon{font-size:20px;line-height:1}
+.debrid-mode-btn .dm-label{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim)}
+.debrid-mode-btn.active-tb .dm-label{color:var(--tb)}
+.debrid-mode-btn.active-rd .dm-label{color:var(--rd)}
+.debrid-mode-btn.active-dual .dm-label{color:var(--dual)}
+.debrid-mode-btn .dm-desc{font-size:10px;color:var(--dim);text-align:center;line-height:1.5}
 
-#toast{position:fixed;bottom:20px;right:20px;background:var(--sur);border:1px solid var(--bord2);border-left:3px solid var(--amber);color:var(--text);padding:10px 18px;border-radius:3px;font-size:12px;transform:translateY(70px);opacity:0;transition:.3s;z-index:9998;max-width:320px}
+.debrid-section{background:var(--bg);border:1px solid var(--bord);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+.debrid-section.tb-section{border-color:rgba(255,140,66,.2)}
+.debrid-section.rd-section{border-color:rgba(176,122,255,.2)}
+.debrid-section-title{font-family:var(--sans);font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.debrid-section-title.tb-title{color:var(--tb)}
+.debrid-section-title.rd-title{color:var(--rd)}
+.debrid-status{font-size:11px;color:var(--dim);transition:.3s;margin-left:8px}
+.debrid-status.ok{color:var(--green)}
+.debrid-status.err{color:var(--red)}
+.debrid-status.wait{color:var(--accent)}
+
+.debrid-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:3px;font-family:var(--sans);font-weight:700;font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-left:6px}
+.debrid-badge.badge-tb{background:var(--tb-bg);border:1px solid var(--tb-dim);color:var(--tb)}
+.debrid-badge.badge-rd{background:var(--rd-bg);border:1px solid var(--rd-dim);color:var(--rd)}
+.debrid-badge.badge-dual{background:var(--dual-bg);border:1px solid rgba(61,214,140,.3);color:var(--dual)}
+
+#toast{position:fixed;bottom:20px;right:20px;background:var(--sur);border:1px solid var(--bord2);border-left:3px solid var(--accent);color:var(--text);padding:10px 18px;border-radius:var(--radius);font-size:12px;transform:translateY(70px);opacity:0;transition:.3s;z-index:9998;max-width:320px}
 #toast.show{transform:translateY(0);opacity:1}
 #toast.err{border-left-color:var(--red)}
+#toast.ok{border-left-color:var(--green)}
 
 hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .info{font-size:11px;color:var(--dim);line-height:1.7}
 .mt8{margin-top:8px}.mt14{margin-top:14px}.mt20{margin-top:20px}
-@keyframes pulse{0%,100%{opacity:.35}50%{opacity:1}}
-.loading{animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.loading{animation:pulse 1.4s ease-in-out infinite}
 </style>
 </head>
 <body>
 
 <header>
-  <div>
-    <div class="logo-wrap">
-      <span class="logo-name">ProwJack</span>
-      <span class="logo-v">PRO v3.7</span>
+  <div class="logo-wrap">
+    <div>
+      <span class="logo-name">ProwJack<span class="logo-v">v3.9</span></span>
     </div>
-    <div class="logo-sub">Stremio · Jackett · Smart Ranking</div>
+    <span class="logo-sub">Jackett · Prowlarr · Stremio</span>
   </div>
   <div class="status-row">
-    <div><span class="dot" id="d-redis"></span><span id="l-redis">Redis</span></div>
-    <div><span class="dot" id="d-jackett"></span><span id="l-jackett">Jackett</span></div>
+    <span><span class="dot wait" id="d-jackett"></span><span id="l-jackett">Jackett / Prowlarr</span></span>
+    <span><span class="dot wait" id="d-redis"></span><span id="l-redis">Redis</span></span>
   </div>
 </header>
 
-<div class="tabs">
-  <button class="tab active" data-tab="setup">⚙️ Configurar</button>
-  <button class="tab" data-tab="ranking">🎯 Ranking</button>
-  <button class="tab" data-tab="metrics">📊 Métricas</button>
-</div>
+<nav class="tabs">
+  <button class="tab active" data-tab="setup">Setup</button>
+  <button class="tab" data-tab="ranking">Ranking</button>
+</nav>
 
+<!-- ══ SETUP ══════════════════════════════════════════════════════ -->
 <div class="pane active" id="pane-setup">
 <div class="g2">
 
   <div class="card">
-    <div class="ctitle">Conexão Jackett</div>
-    <p class="info" style="margin-bottom:12px">A conexão continua vindo das variáveis de ambiente do servidor, mas os indexers agora são escolhidos na interface.</p>
-    <div class="env-box">
-      <div class="env-row"><span class="env-key">URL</span><span class="env-val loading" id="ev-url">carregando...</span></div>
-      <div class="env-row"><span class="env-key">API Key</span><span class="env-val" id="ev-key">—</span></div>
-      <div class="env-row"><span class="env-key">Status</span><span class="env-val" id="ev-status">—</span></div>
-    </div>
-    <button class="btn btn-p" onclick="testConnection()">▶ Testar Conexão</button>
+    <div class="ctitle">Conexão Jackett / Prowlarr</div>
+    <label>URL</label>
+    <input type="text" id="jackettUrl" placeholder="ex: http://prowlarr:9696" />
+    <label>API Key</label>
+    <input type="text" id="jackettKey" placeholder="API Key do Jackett/Prowlarr" />
+    <button class="btn btn-p btn-sm" style="margin-top:4px" onclick="loadIndexers()">Conectar e Carregar Indexers</button>
     <div id="test-log" class="mt8" style="display:none;font-size:11px;color:var(--dim)"></div>
   </div>
 
   <div class="card">
+    <div class="ctitle">StremThru <span style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:1px">Cache Torznab</span></div>
+    <label>URL</label>
+    <input type="text" id="stremthruUrl" placeholder="ex: https://stremthru.13377001.xyz/v0/torznab/api" />
+    <label>API Key <span style="color:var(--dim);font-weight:400;font-size:9px">(opcional)</span></label>
+    <input type="text" id="stremthruKey" placeholder="deixe em branco se não usar" />
+  </div>
+
+
+  <div class="card full">
     <div class="ctitle">Categorias &amp; Limites</div>
-    <label>Tipos de conteúdo</label>
-    <div class="tg-group">
-      <button class="tg on" data-cat="movie">🎬 Filmes</button>
-      <button class="tg on" data-cat="series">📺 Séries</button>
-      <button class="tg" data-cat="anime">🌸 Anime</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <label>Categorias</label>
+        <div class="tg-group">
+          <button class="tg on" data-cat="movie">🎬 Filmes</button>
+          <button class="tg on" data-cat="series">📺 Séries</button>
+          <button class="tg" data-cat="anime">🎌 Anime</button>
+        </div>
+        <div class="anime-info" id="anime-hint" style="display:none">
+          Anime usa indexers especializados (Nyaa, AnimeTosho) e busca por episódio.
+        </div>
+      </div>
+      <div>
+        <label>Ordenação</label>
+        <div class="tg-group" id="sort-group">
+          <button class="tg on" data-sort="cache">Cache primeiro</button>
+          <button class="tg" data-sort="resolution">Resolução</button>
+          <button class="tg" data-sort="size">Tamanho</button>
+          <button class="tg" data-sort="seeders">Seeders</button>
+        </div>
+      </div>
     </div>
-
-    <div class="anime-info" id="anime-hint" style="display:none">
-      🌸 Anime usa IDs do Kitsu e busca absoluta de episódio.<br>
-      Para melhores resultados, selecione um indexer de anime como <strong>Nyaa.si</strong>.
+    <hr/>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:end">
+      <div>
+        <label>Máx Resultados</label>
+        <input type="number" id="maxResults" value="20" min="5" max="100" style="margin-bottom:0" />
+      </div>
+      <div>
+        <label>Slow Threshold (ms)</label>
+        <input type="number" id="slowThreshold" value="8000" min="1000" max="30000" style="margin-bottom:0" />
+      </div>
+      <div style="display:flex;gap:8px;padding-bottom:2px">
+        <button class="tg on" id="skipBadBtn">Skip CAM/TS</button>
+        <button class="tg on" id="onlyLangBtn">Apenas idioma</button>
+      </div>
     </div>
+  </div>
 
-    <label style="margin-top:14px">Máximo de resultados</label>
-    <div class="w-row">
-      <div class="w-label">Resultados</div>
-      <input type="range" id="maxResults" min="5" max="50" step="5" value="20" oninput="sv(this,'maxResults-v')" />
-      <div class="w-val" id="maxResults-v">20</div>
-    </div>
-
-    <label>Timeout por indexer (ms)</label>
-    <div class="w-row">
-      <div class="w-label">Timeout</div>
-      <input type="range" id="slowThreshold" min="2000" max="20000" step="1000" value="8000" oninput="sv(this,'st-v')" />
-      <div class="w-val" id="st-v">8000</div>
-    </div>
-
-    <div class="tg-group mt8">
-      <button class="tg on" id="skipBadBtn" onclick="this.classList.toggle('on')">⛔ Ignorar CAM/TS</button>
-    </div>
-
-    <!-- ── Idioma Prioritário ──────────────────────────────────────── -->
-    <!--
-      FIX: antes havia um botão "🇧🇷 Apenas Dublado/PT-BR" que, combinado
-      com o bônus hardcoded de 1000 pts para PT-BR no score(), fazia com
-      que resultados não-dublados ficassem efetivamente excluídos mesmo com
-      o botão desativado — pois não cabiam dentro do maxResults.
-      
-      Agora:
-        • "Idioma Prioritário" → define qual idioma aparece no TOPO.
-          "Nenhum" = ranking puramente por qualidade/seeders, todos os
-          idiomas aparecem sem preferência.
-        • "🔒 Apenas esse idioma" → filtro estrito, funciona para qualquer
-          idioma selecionado (não só PT-BR).
-    -->
+  <div class="card full">
+    <div class="ctitle">Idioma Prioritário</div>
     <div class="lang-box">
-      <div class="lang-box-title">🌐 Idioma Prioritário</div>
-      <div class="lang-grid" id="lang-grid">
-        <div class="lang-btn" data-lang="" onclick="selectLang(this)">
-          <span class="flag">🌐</span><span>Nenhum</span>
-        </div>
-        <div class="lang-btn selected" data-lang="pt-br" onclick="selectLang(this)">
-          <span class="flag">🇧🇷</span><span>PT-BR</span>
-        </div>
-        <div class="lang-btn" data-lang="en" onclick="selectLang(this)">
-          <span class="flag">🇺🇸</span><span>Inglês</span>
-        </div>
-        <div class="lang-btn" data-lang="es" onclick="selectLang(this)">
-          <span class="flag">🇪🇸</span><span>Espanhol</span>
-        </div>
-        <div class="lang-btn" data-lang="fr" onclick="selectLang(this)">
-          <span class="flag">🇫🇷</span><span>Francês</span>
-        </div>
+      <div class="lang-box-title">Selecionar idioma prioritário</div>
+      <div class="lang-grid">
+        <div class="lang-btn" data-lang="pt-br" onclick="selectLang(this)"><span class="flag">🇧🇷</span> PT-BR</div>
+        <div class="lang-btn" data-lang="en"    onclick="selectLang(this)"><span class="flag">🇺🇸</span> English</div>
+        <div class="lang-btn" data-lang="es"    onclick="selectLang(this)"><span class="flag">🇪🇸</span> Español</div>
+        <div class="lang-btn" data-lang="fr"    onclick="selectLang(this)"><span class="flag">🇫🇷</span> Français</div>
+        <div class="lang-btn" data-lang=""      onclick="selectLang(this)"><span class="flag">🌐</span> Sem pref.</div>
       </div>
-      <div class="lang-info" id="lang-desc">
-        <strong>🇧🇷 PT-BR selecionado</strong> — resultados dublados/PT-BR aparecem no topo. Demais idiomas continuam visíveis abaixo, ordenados por qualidade e seeders.
-      </div>
-      <div class="tg-group" style="margin-top:10px;margin-bottom:0">
-        <button class="tg" id="onlyLangBtn" onclick="this.classList.toggle('on')">🔒 Apenas esse idioma</button>
-      </div>
+      <div class="lang-info" id="lang-desc"></div>
     </div>
-    <!-- ──────────────────────────────────────────────────────────── -->
   </div>
 
   <div class="card full">
     <div class="ctitle">Indexers</div>
-
     <div class="ix-toolbar">
-      <button class="btn btn-s btn-sm" id="allBtn" onclick="setAllIndexers(true)">Todos</button>
+      <button class="btn btn-s btn-sm on" id="allBtn" onclick="setAllIndexers(true)">Todos</button>
       <button class="btn btn-s btn-sm" onclick="setAllIndexers(false)">Nenhum</button>
-      <input class="ix-search" id="ix-search" type="text" placeholder="Filtrar indexers..." oninput="filterIx(this.value)" />
-      <span class="info" id="ix-count">Carregando indexers...</span>
+      <input class="ix-search" id="ix-search" type="text" placeholder="Filtrar indexers…" oninput="filterIx(this.value)" />
+      <span class="info" id="ix-count">Carregando indexers…</span>
     </div>
-
     <div class="ix-grid" id="ix-grid">
-      <div class="ix-empty loading">⏳ Carregando indexers do Jackett...</div>
+      <div class="ix-empty loading">⏳ Carregando indexers do Jackett…</div>
     </div>
   </div>
 
+  <!-- ══ DEBRID NATIVO ════════════════════════════════════════════ -->
   <div class="card full">
-    <div class="ctitle">🔌 StremThru Wrap (Debrid Proxy)</div>
-    <p class="info" style="margin-bottom:12px">Opcional: Suporta até 2 contas Debrid usando StremThru como proxy em background. O rótulo "P2P" sumirá e o addon se adaptará à sigla do seu serviço!</p>
-    
-    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--text); font-size:12px;">
-      <input type="checkbox" id="useStremThru" style="width:16px; height:16px; accent-color:var(--amber);" onchange="document.getElementById('stremThruConfig').style.display = this.checked ? 'block' : 'none'">
-      Ativar Proxy Debrid Oculto (StremThru)
+    <div class="ctitle">
+      ⚡ Debrid Direto
+      <span id="native-debrid-badge" style="display:none"></span>
+    </div>
+    <p class="info" style="margin-bottom:14px">
+      Integração nativa com <strong style="color:var(--tb)">TorBox</strong> e/ou <strong style="color:var(--rd)">Real-Debrid</strong> — sem intermediários. 
+      O servidor verifica o cache antes de agir: só torrents cacheados geram link HTTP direto. 
+      Links são entregues ao Stremio como URL, sem cliente torrent.
+    </p>
+
+    <label style="display:flex;align-items:center;gap:9px;cursor:pointer;color:var(--text);font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px;">
+      <input type="checkbox" id="useNativeDebrid" style="width:15px;height:15px;accent-color:var(--amber);" onchange="toggleNativeDebrid(this.checked)">
+      Ativar Debrid Nativo
     </label>
 
-    <div id="stremThruConfig" style="display:none; background:rgba(245,166,35,.05); border:1px solid var(--adim); border-radius:3px; padding:14px; margin-top:14px;">
-      
-      <div class="w-row" style="grid-template-columns: 120px 1fr; gap:10px;">
-        <div class="w-label">StremThru URL</div>
-        <input type="text" id="stUrl" placeholder="ex: https://stremthru.13377001.xyz" value="https://stremthru.13377001.xyz" style="margin-bottom:0;">
+    <div id="nativeDebridConfig" style="display:none">
+
+      <!-- Seletor de Modo -->
+      <div style="margin-bottom:16px">
+        <div style="font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--dim);margin-bottom:10px">Modo de operação</div>
+        <div class="debrid-mode-grid">
+          <div class="debrid-mode-btn" id="dm-torbox" onclick="selectDebridMode('torbox')">
+            <span class="dm-icon">🟠</span>
+            <span class="dm-label">TorBox</span>
+            <span class="dm-desc">Apenas TorBox</span>
+          </div>
+          <div class="debrid-mode-btn active-dual" id="dm-dual" onclick="selectDebridMode('dual')">
+            <span class="dm-icon">⚡</span>
+            <span class="dm-label">Dual</span>
+            <span class="dm-desc">TorBox + RD em paralelo</span>
+          </div>
+          <div class="debrid-mode-btn" id="dm-realdebrid" onclick="selectDebridMode('realdebrid')">
+            <span class="dm-icon">🟣</span>
+            <span class="dm-label">Real-Debrid</span>
+            <span class="dm-desc">Apenas Real-Debrid</span>
+          </div>
+        </div>
       </div>
 
-      <hr style="border-top:1px solid var(--bord2); margin:14px 0;">
-
-      <div class="w-row" style="grid-template-columns: 120px 1fr; gap:10px; margin-bottom:10px;">
-        <div class="w-label">Serviço 1 (Store)</div>
-        <select id="stStore1" class="ix-select" style="margin-bottom:0;">
-            <option value="tb">TorBox</option>
-            <option value="rd">Real-Debrid</option>
-            <option value="ad">AllDebrid</option>
-            <option value="pm">Premiumize</option>
-            <option value="dl">Debrid-Link</option>
-            <option value="oc">Offcloud</option>
-        </select>
+      <!-- TorBox Section -->
+      <div class="debrid-section tb-section" id="tb-panel">
+        <div class="debrid-section-title tb-title">🟠 TorBox</div>
+        <label>API Key</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <div style="flex:1;position:relative">
+            <input type="password" id="tbKey" placeholder="Insira sua TorBox API Key…" style="margin-bottom:8px;padding-right:38px" oninput="onDebridKeyInput()">
+            <button onclick="toggleVisibility('tbKey', this)" style="position:absolute;right:10px;top:9px;background:none;border:none;color:var(--dim);cursor:pointer;font-size:13px">👁</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-tb btn-sm" onclick="testDebrid('torbox')">Testar Conexão</button>
+          <span class="debrid-status" id="tb-status"></span>
+        </div>
+        <div class="info mt8" style="font-size:10px">
+          Obtenha em: <a href="https://torbox.app/settings" target="_blank" style="color:var(--tb);text-decoration:none">torbox.app/settings</a>
+        </div>
       </div>
-      <div class="w-row" style="grid-template-columns: 120px 1fr; gap:10px;">
-        <div class="w-label">API Token 1</div>
-        <input type="text" id="stToken1" placeholder="[OBRIGATÓRIO] API Token do Serviço 1" style="margin-bottom:0;">
-      </div>
 
-      <hr style="border-top:1px solid var(--bord2); margin:14px 0;">
-
-      <div class="w-row" style="grid-template-columns: 120px 1fr; gap:10px; margin-bottom:10px;">
-        <div class="w-label" style="color:var(--dim)">Serviço 2 (Opcional)</div>
-        <select id="stStore2" class="ix-select" style="margin-bottom:0;">
-            <option value="">-- Nenhum --</option>
-            <option value="tb">TorBox</option>
-            <option value="rd">Real-Debrid</option>
-            <option value="ad">AllDebrid</option>
-            <option value="pm">Premiumize</option>
-            <option value="dl">Debrid-Link</option>
-            <option value="oc">Offcloud</option>
-        </select>
-      </div>
-      <div class="w-row" style="grid-template-columns: 120px 1fr; gap:10px;">
-        <div class="w-label" style="color:var(--dim)">API Token 2</div>
-        <input type="text" id="stToken2" placeholder="[OPCIONAL] API Token do Serviço 2" style="margin-bottom:0;">
+      <!-- Real-Debrid Section -->
+      <div class="debrid-section rd-section" id="rd-panel">
+        <div class="debrid-section-title rd-title">🟣 Real-Debrid</div>
+        <label>API Key</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <div style="flex:1;position:relative">
+            <input type="password" id="rdKey" placeholder="Insira sua Real-Debrid API Key…" style="margin-bottom:8px;padding-right:38px" oninput="onDebridKeyInput()">
+            <button onclick="toggleVisibility('rdKey', this)" style="position:absolute;right:10px;top:9px;background:none;border:none;color:var(--dim);cursor:pointer;font-size:13px">👁</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-rd btn-sm" onclick="testDebrid('realdebrid')">Testar Conexão</button>
+          <span class="debrid-status" id="rd-status"></span>
+        </div>
+        <div class="info mt8" style="font-size:10px">
+          Obtenha em: <a href="https://real-debrid.com/apitoken" target="_blank" style="color:var(--rd);text-decoration:none">real-debrid.com/apitoken</a>
+        </div>
       </div>
 
     </div>
   </div>
+  <!-- ══ FIM DEBRID NATIVO ════════════════════════════════════════ -->
+
+
 
   <div class="card full">
     <div class="ctitle">URL de Instalação</div>
@@ -332,6 +374,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 </div>
 </div>
 
+<!-- ══ RANKING ════════════════════════════════════════════════════ -->
 <div class="pane" id="pane-ranking">
 <div style="max-width:520px">
   <div class="card">
@@ -361,7 +404,6 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
       <input type="range" id="w-codec" min="0" max="100" value="5" oninput="sv(this,'wv-codec');preview()" />
       <div class="w-val" id="wv-codec">5</div>
     </div>
-
     <hr />
     <div class="ctitle" style="margin-top:4px">Preview de Score</div>
     <pre id="preview-box" style="background:#060709;border:1px solid var(--bord);border-radius:3px;padding:12px;font-size:11px;line-height:1.9;overflow-x:auto;color:var(--green)"></pre>
@@ -369,26 +411,17 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 </div>
 </div>
 
-<div class="pane" id="pane-metrics">
-  <div style="max-width:1080px">
-    <div class="row" style="margin-bottom:16px">
-      <button class="btn btn-p" onclick="loadMetrics()">🔄 Atualizar</button>
-      <span class="info">Dados do Redis — últimas 24h</span>
-    </div>
-    <div class="metrics-g" id="metrics-g">
-      <div class="empty">Clique em Atualizar</div>
-    </div>
-  </div>
-</div>
-
 <div id="toast"></div>
 
 <script>
+// ── Estado global ─────────────────────────────────────────────────
 const state = {
   allIndexers: [],
   selectedIndexers: [],
   useAll: true,
-  priorityLang: 'pt-br', // padrão: PT-BR no topo
+  priorityLang: 'pt-br',
+  debridMode: 'dual',
+  sortMode: 'cache',
 };
 
 // ── Idioma Prioritário ────────────────────────────────────────────
@@ -407,20 +440,112 @@ function selectLang(el) {
   document.getElementById('lang-desc').innerHTML = LANG_DESCS[state.priorityLang] || '';
   preview();
 }
-// ─────────────────────────────────────────────────────────────────
 
-function sv(el, id) { document.getElementById(id).textContent = el.value; }
-function toast(msg, err=false) {
-  const el = document.getElementById('toast'); el.textContent = msg; el.className = 'show' + (err ? ' err' : '');
-  clearTimeout(el._t); el._t = setTimeout(() => el.className = '', 3200);
+// ── Debrid Nativo ─────────────────────────────────────────────────
+function toggleNativeDebrid(on) {
+  document.getElementById('nativeDebridConfig').style.display = on ? 'block' : 'none';
+  const badge = document.getElementById('native-debrid-badge');
+  if (on) {
+    updateDebridBadge();
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
 }
-function dot(id, stateName) { document.getElementById('d-' + id).className = 'dot ' + stateName; }
-function label(id, txt) { document.getElementById('l-' + id).textContent = txt; }
+
+function selectDebridMode(mode) {
+  state.debridMode = mode;
+  ['torbox','dual','realdebrid'].forEach(m => {
+    const btn = document.getElementById('dm-' + m);
+    btn.className = 'debrid-mode-btn';
+    if (m === mode) {
+      if (m === 'torbox')      btn.classList.add('active-tb');
+      else if (m === 'dual')   btn.classList.add('active-dual');
+      else                     btn.classList.add('active-rd');
+    }
+  });
+  // Mostrar/ocultar paineis de key
+  const tbPanel = document.getElementById('tb-panel');
+  const rdPanel = document.getElementById('rd-panel');
+  tbPanel.style.display = (mode === 'realdebrid') ? 'none' : 'block';
+  rdPanel.style.display = (mode === 'torbox')     ? 'none' : 'block';
+  updateDebridBadge();
+}
+
+function updateDebridBadge() {
+  const badge = document.getElementById('native-debrid-badge');
+  const mode = state.debridMode;
+  if (mode === 'torbox') {
+    badge.className = 'debrid-badge badge-tb';
+    badge.textContent = '🟠 TorBox';
+  } else if (mode === 'realdebrid') {
+    badge.className = 'debrid-badge badge-rd';
+    badge.textContent = '🟣 Real-Debrid';
+  } else {
+    badge.className = 'debrid-badge badge-dual';
+    badge.textContent = '⚡ Dual';
+  }
+}
+
+function onDebridKeyInput() { /* feedback ao vivo se necessário */ }
+
+function toggleVisibility(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '🙈'; }
+  else { el.type = 'password'; btn.textContent = '👁'; }
+}
+
+async function testDebrid(provider) {
+  const statusEl = document.getElementById(provider === 'torbox' ? 'tb-status' : 'rd-status');
+  const key = provider === 'torbox'
+    ? document.getElementById('tbKey').value.trim()
+    : document.getElementById('rdKey').value.trim();
+
+  if (!key) {
+    statusEl.className = 'debrid-status err';
+    statusEl.textContent = '✗ Insira a API Key';
+    return;
+  }
+  statusEl.className = 'debrid-status wait';
+  statusEl.textContent = '⏳ Verificando…';
+
+  try {
+    // Usa proxy local para evitar CORS — /api/debrid/test/:provider?key=...
+    const res  = await fetch(`/api/debrid/test/${provider}?key=${encodeURIComponent(key)}`);
+    const data = await res.json();
+    if (data.ok) {
+      const label = (data.name || 'Autenticado') + (data.plan ? ' · ' + data.plan : '');
+      statusEl.className = 'debrid-status ok';
+      statusEl.textContent = '✔ ' + label;
+      toast('✔ ' + (provider === 'torbox' ? 'TorBox' : 'Real-Debrid') + ' conectado! ' + (data.name || ''), 'ok');
+    } else {
+      statusEl.className = 'debrid-status err';
+      statusEl.textContent = '✗ ' + (data.error || 'Erro desconhecido');
+    }
+  } catch (e) {
+    statusEl.className = 'debrid-status err';
+    statusEl.textContent = '✗ Falha: ' + e.message;
+  }
+}
+
+// ── Utilidades ────────────────────────────────────────────────────
+function sv(el, id) { document.getElementById(id).textContent = el.value; }
+
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type === 'err' ? ' err' : type === 'ok' ? ' ok' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 3200);
+}
+
+function dot(id, s) { document.getElementById('d-' + id).className = 'dot ' + s; }
+function label(id, t) { document.getElementById('l-' + id).textContent = t; }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab, .pane').forEach(e => e.classList.remove('active'));
-  t.classList.add('active'); document.getElementById('pane-' + t.dataset.tab).classList.add('active');
-  if (t.dataset.tab === 'metrics') loadMetrics();
+  t.classList.add('active');
+  document.getElementById('pane-' + t.dataset.tab).classList.add('active');
 }));
 
 document.querySelectorAll('.tg[data-cat]').forEach(t => {
@@ -431,36 +556,60 @@ document.querySelectorAll('.tg[data-cat]').forEach(t => {
   });
 });
 
+document.querySelectorAll('#sort-group .tg[data-sort]').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('#sort-group .tg').forEach(b => b.classList.remove('on'));
+    t.classList.add('on');
+    state.sortMode = t.dataset.sort;
+  });
+});
+
+document.getElementById('skipBadBtn').addEventListener('click', function() { this.classList.toggle('on'); });
+document.getElementById('onlyLangBtn').addEventListener('click', function() { this.classList.toggle('on'); });
+
 function getCats() { return [...document.querySelectorAll('.tg[data-cat].on')].map(t => t.dataset.cat); }
 
 async function loadEnv() {
   try {
     const env = await fetch('/api/env').then(r => r.json());
-    document.getElementById('ev-url').textContent = env.jackettUrl; document.getElementById('ev-url').className = 'env-val';
-    document.getElementById('ev-key').textContent = env.apiKeySet ? '✔ configurada' : '✗ não definida';
-    document.getElementById('ev-key').className = 'env-val ' + (env.apiKeySet ? '' : 'err');
-    document.getElementById('ev-status').textContent = env.apiKeySet ? 'pronto para teste' : 'faltando API key';
-    document.getElementById('ev-status').className = 'env-val ' + (env.apiKeySet ? '' : 'err');
-    dot('redis', 'wait'); label('redis', 'Redis…');
-  } catch {
-    document.getElementById('ev-url').textContent = 'Erro ao carregar'; document.getElementById('ev-url').className = 'env-val err';
-  }
+    if (env.jackettUrl)   document.getElementById('jackettUrl').value   = env.jackettUrl;
+    if (env.jackettKey)   document.getElementById('jackettKey').value   = env.jackettKey;
+    if (env.stremthruUrl) document.getElementById('stremthruUrl').value = env.stremthruUrl;
+    if (env.stremthruKey) document.getElementById('stremthruKey').value = env.stremthruKey;
+    dot('redis', env.redisOk ? 'ok' : 'err');
+    label('redis', env.redisOk ? `Redis` : 'Redis (offline)');
+  } catch {}
 }
 
 async function loadIndexers() {
-  const grid = document.getElementById('ix-grid'); const count = document.getElementById('ix-count');
-  grid.innerHTML = '<div class="ix-empty loading">⏳ Carregando indexers...</div>'; count.textContent = 'Carregando indexers...';
+  const grid = document.getElementById('ix-grid');
+  const count = document.getElementById('ix-count');
+  const jackettUrl = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
+  const jackettKey = document.getElementById('jackettKey').value.trim();
+  if (!jackettUrl) { toast('Insira a URL do Jackett/Prowlarr', 'err'); return; }
+  grid.innerHTML = '<div class="ix-empty loading">Conectando ao Jackett...</div>';
+  count.textContent = 'Carregando...';
+  dot('jackett','wait'); label('jackett','Jackett / Prowlarr');
   try {
-    const data = await fetch('/api/indexers').then(r => r.json());
-    if (!data.ok) { grid.innerHTML = `<div class="ix-empty">❌ ${data.error || 'Falha'}</div>`; count.textContent = 'Falha ao carregar'; dot('jackett', 'err'); label('jackett', 'Jackett ✗'); return; }
-    state.allIndexers = (data.indexers || []).map(ix => ({ id: ix.id || ix.ID || ix.name, name: ix.name || ix.id || ix.ID }));
-    state.useAll = true; state.selectedIndexers = state.allIndexers.map(ix => ix.id);
+    const data = await fetch(`/api/indexers?url=${encodeURIComponent(jackettUrl)}&key=${encodeURIComponent(jackettKey)}`).then(r => r.json());
+    if (!data.ok) {
+      grid.innerHTML = `<div class="ix-empty">${data.error || 'Falha'}</div>`;
+      count.textContent = 'Falha ao carregar';
+      dot('jackett','err'); label('jackett','Jackett / Prowlarr');
+      return;
+    }
+    state.allIndexers = (data.indexers||[]).map(ix => ({ id: ix.id||ix.ID||ix.name, name: ix.name||ix.id||ix.ID }));
+    state.useAll = true;
+    state.selectedIndexers = state.allIndexers.map(ix => ix.id);
     renderIndexers(state.allIndexers);
     document.getElementById('allBtn').classList.add('on');
-    count.textContent = `${state.allIndexers.length} indexers disponíveis`;
-    dot('jackett', 'ok'); label('jackett', `Jackett ✓ (${state.allIndexers.length})`);
-  } catch (e) {
-    grid.innerHTML = `<div class="ix-empty">❌ ${e.message}</div>`; count.textContent = 'Falha'; dot('jackett', 'err'); label('jackett', 'Jackett ✗');
+    count.textContent = `${state.allIndexers.length} indexers`;
+    dot('jackett','ok'); label('jackett',`Jackett / Prowlarr (${state.allIndexers.length})`);
+    toast(`${state.allIndexers.length} indexers carregados`, 'ok');
+  } catch(e) {
+    grid.innerHTML = `<div class="ix-empty">${e.message}</div>`;
+    count.textContent = 'Falha';
+    dot('jackett','err'); label('jackett','Jackett / Prowlarr');
   }
 }
 
@@ -471,56 +620,69 @@ function renderIndexers(list) {
   list.forEach(ix => {
     const checked = state.useAll || state.selectedIndexers.includes(ix.id);
     const div = document.createElement('label');
-    div.className = 'ix-item' + (checked ? ' on' : ''); div.dataset.id = ix.id; div.dataset.name = ix.name.toLowerCase();
-    div.innerHTML = `<input type="checkbox" ${checked ? 'checked' : ''} /><span title="${ix.name}">${ix.name}</span>`;
+    div.className = 'ix-item' + (checked ? ' on' : '');
+    div.dataset.id   = ix.id;
+    div.dataset.name = ix.name.toLowerCase();
+    div.innerHTML    = `<input type="checkbox" ${checked?'checked':''} /><span title="${ix.name}">${ix.name}</span>`;
     const input = div.querySelector('input');
     input.addEventListener('change', () => { div.classList.toggle('on', input.checked); syncSelected(); });
-    div.addEventListener('click', (e) => { if (e.target.tagName.toLowerCase() === 'input') return; input.checked = !input.checked; div.classList.toggle('on', input.checked); syncSelected(); });
+    div.addEventListener('click', e => {
+      if (e.target.tagName.toLowerCase() === 'input') return;
+      input.checked = !input.checked;
+      div.classList.toggle('on', input.checked);
+      syncSelected();
+    });
     grid.appendChild(div);
   });
 }
 
 function syncSelected() {
-  state.selectedIndexers = [...document.querySelectorAll('#ix-grid .ix-item input:checked')].map(input => input.closest('.ix-item').dataset.id);
+  state.selectedIndexers = [...document.querySelectorAll('#ix-grid .ix-item input:checked')]
+    .map(i => i.closest('.ix-item').dataset.id);
   state.useAll = state.selectedIndexers.length === state.allIndexers.length;
   document.getElementById('allBtn').classList.toggle('on', state.useAll);
 }
 
 function setAllIndexers(on) {
-  document.querySelectorAll('#ix-grid .ix-item').forEach(el => { const input = el.querySelector('input'); input.checked = on; el.classList.toggle('on', on); });
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    const input = el.querySelector('input');
+    input.checked = on;
+    el.classList.toggle('on', on);
+  });
   syncSelected();
 }
 
 function filterIx(q) {
   const text = q.toLowerCase().trim(); let visible = 0;
-  document.querySelectorAll('#ix-grid .ix-item').forEach(el => { const ok = !text || el.dataset.name.includes(text); el.style.display = ok ? '' : 'none'; if (ok) visible++; });
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    const ok = !text || el.dataset.name.includes(text);
+    el.style.display = ok ? '' : 'none';
+    if (ok) visible++;
+  });
   document.getElementById('ix-count').textContent = `${visible}/${state.allIndexers.length} indexers visíveis`;
 }
 
 async function testConnection() {
-  const logEl = document.getElementById('test-log'); logEl.style.display = 'block'; logEl.innerHTML = '<span class="loading">⏳ Conectando ao Jackett...</span>';
-  dot('jackett', 'wait'); label('jackett', 'Jackett…');
-  try {
-    const data = await fetch('/api/test').then(r => r.json());
-    if (data.ok) {
-      logEl.innerHTML = `<span style="color:var(--green)">✅ ${data.count} indexers encontrados</span>`; dot('jackett', 'ok'); label('jackett', `Jackett ✓ (${data.count})`); toast(`${data.count} indexers carregados!`); await loadIndexers();
-    } else {
-      logEl.innerHTML = `<span style="color:var(--red)">❌ ${data.error}</span>`; dot('jackett', 'err'); label('jackett', 'Jackett ✗');
-    }
-  } catch (e) { logEl.innerHTML = `<span style="color:var(--red)">❌ ${e.message}</span>`; dot('jackett', 'err'); label('jackett', 'Jackett ✗'); }
+  return loadIndexers();
 }
 
-async function checkRedis() { try { await fetch('/api/metrics').then(r => r.json()); dot('redis', 'ok'); label('redis', 'Redis ✓'); } catch { dot('redis', 'err'); label('redis', 'Redis ✗'); } }
-
-function getWeights() { return { language: +document.getElementById('w-lang').value, resolution: +document.getElementById('w-res').value, seeders: +document.getElementById('w-seed').value, size: +document.getElementById('w-size').value, codec: +document.getElementById('w-codec').value }; }
+function getWeights() {
+  return {
+    language:   +document.getElementById('w-lang').value,
+    resolution: +document.getElementById('w-res').value,
+    seeders:    +document.getElementById('w-seed').value,
+    size:       +document.getElementById('w-size').value,
+    codec:      +document.getElementById('w-codec').value,
+  };
+}
 
 function preview() {
-  const w = getWeights();
-  const pl = state.priorityLang; // idioma prioritário atual
+  const w  = getWeights();
+  const pl = state.priorityLang;
   const examples = [
-    { t: 'Duna.2021.1080p.BluRay.x265.Dublado', seeds: 850, sizeGb: 6.2 },
-    { t: 'Dune.2021.2160p.UHD.REMUX.Atmos', seeds: 1500, sizeGb: 58 },
-    { t: 'Dune.2021.1080p.WEBRip.x264', seeds: 3200, sizeGb: 2.1 }
+    { t: 'Duna.2021.1080p.BluRay.x265.Dublado', seeds: 850,  sizeGb: 6.2 },
+    { t: 'Dune.2021.2160p.UHD.REMUX.Atmos',     seeds: 1500, sizeGb: 58  },
+    { t: 'Dune.2021.1080p.WEBRip.x264',          seeds: 3200, sizeGb: 2.1 }
   ];
   function matchesPriority(t) {
     if (!pl) return false;
@@ -535,30 +697,42 @@ function preview() {
   }
   function calcScore(ex) {
     let s = 0;
-    // Mesmo cálculo do addon.js score() com priorityLang
-    if (pl && matchesPriority(ex.t))            s += w.language * 25;
-    else if (/(multi|dual)/i.test(ex.t))        s += w.language * 10;
-    else if (hasAnyLang(ex.t))                  s += w.language * 5;
-    else                                         s += w.language * 2;
-    if (/4k|2160/i.test(ex.t)) s += 4 * w.resolution * 10; else if (/1080/i.test(ex.t)) s += 3 * w.resolution * 10; else if (/720/i.test(ex.t)) s += 2 * w.resolution * 10;
-    if (/remux/i.test(ex.t)) s += 5 * 50; else if (/bluray/i.test(ex.t)) s += 4 * 50; else if (/webrip/i.test(ex.t)) s += 2.5 * 50;
-    s += ex.seeds * (w.seeders / 10); s += Math.max(0, 10 - Math.abs(ex.sizeGb - 8)) * w.size;
-    if (/x265|hevc/i.test(ex.t)) s += 3 * w.codec * 5; else if (/x264|avc/i.test(ex.t)) s += 2 * w.codec * 5;
+    if (pl && matchesPriority(ex.t))       s += w.language * 25;
+    else if (/(multi|dual)/i.test(ex.t))   s += w.language * 10;
+    else if (hasAnyLang(ex.t))             s += w.language * 5;
+    else                                   s += w.language * 2;
+    if (/4k|2160/i.test(ex.t))      s += 4 * w.resolution * 10;
+    else if (/1080/i.test(ex.t))    s += 3 * w.resolution * 10;
+    else if (/720/i.test(ex.t))     s += 2 * w.resolution * 10;
+    if (/remux/i.test(ex.t))        s += 5 * 50;
+    else if (/bluray/i.test(ex.t))  s += 4 * 50;
+    else if (/webrip/i.test(ex.t))  s += 2.5 * 50;
+    s += ex.seeds * (w.seeders / 10);
+    s += Math.max(0, 10 - Math.abs(ex.sizeGb - 8)) * w.size;
+    if (/x265|hevc/i.test(ex.t))    s += 3 * w.codec * 5;
+    else if (/x264|avc/i.test(ex.t)) s += 2 * w.codec * 5;
     return Math.round(s);
   }
-  const scored = examples.map(e => ({ ...e, score: calcScore(e) })).sort((a, b) => b.score - a.score);
-  document.getElementById('preview-box').innerHTML = scored.map((e, i) => `${['🥇','🥈','🥉'][i]} Score: <strong style="color:var(--amber)">${e.score}</strong>\n   ${e.t}`).join('\n\n');
+  const scored = examples.map(e => ({ ...e, score: calcScore(e) })).sort((a,b) => b.score - a.score);
+  document.getElementById('preview-box').innerHTML = scored.map((e,i) =>
+    `${['🥇','🥈','🥉'][i]} Score: <strong style="color:var(--accent)">${e.score}</strong>\n   ${e.t}`
+  ).join('\n\n');
 }
 
 function encodeBaseURL(obj) {
-    const jsonStr = JSON.stringify(obj);
-    const utf8Str = unescape(encodeURIComponent(jsonStr));
-    return btoa(utf8Str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const jsonStr = JSON.stringify(obj);
+  const utf8Str = unescape(encodeURIComponent(jsonStr));
+  return btoa(utf8Str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 
 function buildPrefs() {
   const selected  = state.selectedIndexers.length ? state.selectedIndexers : ['all'];
-  const isDebrid  = document.getElementById('useStremThru').checked;
+  const isNative  = document.getElementById('useNativeDebrid').checked;
+
+  const jackettUrl   = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
+  const jackettKey   = document.getElementById('jackettKey').value.trim();
+  const stremthruUrl = document.getElementById('stremthruUrl').value.trim().replace(/\/+$/, '');
+  const stremthruKey = document.getElementById('stremthruKey').value.trim();
 
   const prefs = {
     indexers:        state.useAll ? ['all'] : selected,
@@ -567,33 +741,32 @@ function buildPrefs() {
     maxResults:      +document.getElementById('maxResults').value,
     slowThreshold:   +document.getElementById('slowThreshold').value,
     skipBadReleases: document.getElementById('skipBadBtn').classList.contains('on'),
-    // FIX: priorityLang vem do seletor de idioma (state.priorityLang).
-    // "" = sem preferência; ranking puro por qualidade/seeders.
-    // "pt-br"/"en"/etc. = idioma prioritário aparece no topo, demais ainda aparecem.
     priorityLang:    state.priorityLang,
-    // onlyDubbed agora usa o botão "🔒 Apenas esse idioma", vinculado ao priorityLang.
-    // Quando priorityLang="" e onlyDubbed=true, o addon ignora o filtro por segurança.
     onlyDubbed:      document.getElementById('onlyLangBtn').classList.contains('on'),
-    debrid:          isDebrid,
+    sortMode:        state.sortMode,
+    debrid:          isNative,
   };
 
-  if (isDebrid) {
-    const stUrl    = document.getElementById('stUrl').value.trim().replace(/\/$/, '');
-    const stStore1 = document.getElementById('stStore1').value;
-    const stToken1 = document.getElementById('stToken1').value.trim();
-    const stStore2 = document.getElementById('stStore2').value;
-    const stToken2 = document.getElementById('stToken2').value.trim();
+  if (jackettUrl) prefs.jackett = { url: jackettUrl, key: jackettKey };
+  if (stremthruUrl) prefs.stremthru = { url: stremthruUrl, key: stremthruKey };
 
-    if (!stToken1) throw new Error("stToken1_missing");
+  // ── Debrid Nativo ──────────────────────────────────────
+  if (isNative) {
+    const mode   = state.debridMode;
+    const tbKey  = document.getElementById('tbKey').value.trim();
+    const rdKey  = document.getElementById('rdKey').value.trim();
 
-    const storesArray = [{ c: stStore1, t: stToken1 }];
-    if (stStore2 && stToken2) storesArray.push({ c: stStore2, t: stToken2 });
+    if (mode === 'torbox'     && !tbKey) throw new Error('tb_key_missing');
+    if (mode === 'realdebrid' && !rdKey) throw new Error('rd_key_missing');
+    if (mode === 'dual' && !tbKey && !rdKey) throw new Error('dual_key_missing');
 
-    prefs.stConfig   = { url: stUrl, stores: storesArray };
-    prefs.addonName  = `ProwJack [${stStore1.toUpperCase()}]`;
-  } else {
-    prefs.addonName = `ProwJack PRO`;
+    prefs.debridConfig = { mode, torboxKey: tbKey || '', rdKey: rdKey || '' };
+
+    const nameMap = { torbox: 'ProwJack [TB]', realdebrid: 'ProwJack [RD]', dual: 'ProwJack PRO' };
+    prefs.addonName = nameMap[mode] || 'ProwJack PRO';
   }
+
+  if (!isNative) prefs.addonName = 'ProwJack PRO';
 
   return prefs;
 }
@@ -606,11 +779,11 @@ function generate() {
     const finalStremioUrl  = `stremio://${location.host}/${encoded}/manifest.json`;
 
     if (prefs.stConfig && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      alert("⚠️ AVISO: Usando o IP 'localhost', o StremThru remoto não conseguirá alcançar este ProwJack para resolver os links Debrid. Gere a URL usando seu IP ou domínio público!");
+      alert("⚠️ AVISO: Usando 'localhost', o StremThru remoto não conseguirá alcançar este ProwJack. Use seu IP ou domínio público!");
     }
 
     document.getElementById('ibox-url').textContent = finalManifestUrl;
-    document.getElementById('ibox-url').className = 'ibox-url';
+    document.getElementById('ibox-url').className   = 'ibox-url';
 
     const link = document.getElementById('stremio-a');
     link.href = finalStremioUrl;
@@ -620,36 +793,43 @@ function generate() {
     const langLabel = prefs.priorityLang
       ? `Idioma: ${prefs.priorityLang.toUpperCase()}` + (prefs.onlyDubbed ? ' (apenas)' : ' (prioritário)')
       : 'Sem preferência de idioma';
-    toast(`URL gerada! ${langLabel}`);
-  } catch (err) {
-    if (err.message === 'stToken1_missing') {
-      toast('ERRO: O Token do Serviço 1 é obrigatório!', true);
-      document.getElementById('stToken1').focus();
-    }
+
+    const debridLabel = prefs.debridConfig
+      ? ` · Debrid: ${prefs.debridConfig.mode.toUpperCase()}`
+      : '';
+
+    toast(`✔ URL gerada! ${langLabel}${debridLabel}`, 'ok');
+  } catch(err) {
+    const msgs = {
+      tb_key_missing:   'ERRO: API Key do TorBox é obrigatória!',
+      rd_key_missing:   'ERRO: API Key do Real-Debrid é obrigatória!',
+      dual_key_missing: 'ERRO: Insira ao menos uma API Key (TorBox ou Real-Debrid)!',
+    };
+    toast(msgs[err.message] || 'Erro desconhecido', 'err');
+    if (err.message === 'tb_key_missing')   document.getElementById('tbKey').focus();
+    if (err.message === 'rd_key_missing')   document.getElementById('rdKey').focus();
   }
 }
 
 function copyUrl() {
   const url = document.getElementById('ibox-url').textContent;
-  if (url.startsWith('—')) { toast('Gere a URL primeiro', true); return; }
-  navigator.clipboard.writeText(url).then(() => toast('URL copiada!'));
+  if (url.startsWith('—')) { toast('Gere a URL primeiro', 'err'); return; }
+  navigator.clipboard.writeText(url).then(() => toast('URL copiada!', 'ok'));
 }
 
-async function loadMetrics() {
-  const g = document.getElementById('metrics-g'); g.innerHTML = '<div class="empty loading">⏳ Carregando...</div>';
-  try {
-    const metrics = await fetch('/api/metrics').then(r => r.json()); const entries = Object.entries(metrics);
-    if (!entries.length) { g.innerHTML = '<div class="empty">Nenhuma métrica.</div>'; return; }
-    g.innerHTML = entries.map(([name, m]) => {
-      const rc = m.successRate > 80 ? 'ok' : m.successRate > 50 ? 'warn' : 'bad';
-      const dc = m.avgMs < 2000 ? 'ok' : m.avgMs < 5000 ? 'warn' : 'bad';
-      return `<div class="mc"><div class="mc-name">📡 ${name}<button class="btn btn-d" onclick="delMetric('${name}')">Reset</button></div><div class="mc-row"><span class="mk">Chamadas</span><span class="mv">${m.calls}</span></div><div class="mc-row"><span class="mk">Avg tempo</span><span class="mv ${dc}">${m.avgMs}ms</span></div><div class="mc-row"><span class="mk">Sucesso</span><span class="mv ${rc}">${m.successRate}%</span></div><div class="bar"><div class="bar-fill" style="width:${m.successRate||0}%"></div></div></div>`;
-    }).join('');
-  } catch (e) { g.innerHTML = `<div class="empty" style="color:var(--red)">❌ ${e.message}</div>`; }
-}
-async function delMetric(name) { await fetch(`/api/metrics/${name}`, { method:'DELETE' }); toast(`Métricas resetadas`); loadMetrics(); }
+async function loadMetrics() {}
+async function delMetric() {}
+async function checkRedis() {}
 
-window.addEventListener('load', async () => { loadEnv(); checkRedis(); preview(); await loadIndexers(); });
+// ── Init ──────────────────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  const defaultLangBtn = document.querySelector('.lang-btn[data-lang="pt-br"]');
+  if (defaultLangBtn) selectLang(defaultLangBtn);
+  selectDebridMode('dual');
+  loadEnv();
+  preview();
+});
 </script>
 </body>
 </html>
+
