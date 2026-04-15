@@ -3,15 +3,23 @@ services:
     build: .
     container_name: prowjack
     restart: unless-stopped
+#    network_mode: "service:gluetun"
     networks:
       - npm-net
     ports:
       - "7014:7014"
+    env_file:
+      - ./.env
     environment:
-      - JACKETT_URL=http://jackett:9117
-      - JACKETT_API_KEY=<minhakey>
-      - REDIS_URL=redis://redis:6379
       - PORT=7014
-      - INDEXERS=capybarabr,samaritano,seedpool-api
-    depends_on:
-      - redis
+      - ADDON_PUBLIC_URL=https://prowjack.004123.xyz
+    volumes:
+      - /media/vinicius/Arquivos:/data             # ← compartilhado com qBittorrent
+
+networks:
+  npm-net:
+    external: true
+    name: server_npm-net
+
+
+
