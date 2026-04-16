@@ -182,27 +182,25 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
 <div class="pane active" id="pane-setup">
 <div class="g2">
 
-  <div class="card">
+  <div class="card full">
     <div class="ctitle">Conexão Jackett / Prowlarr</div>
-    <label>URL</label>
-    <input type="text" id="jackettUrl" placeholder="ex: http://prowlarr:9696" />
-    <label>API Key</label>
-    <input type="text" id="jackettKey" placeholder="API Key do Jackett/Prowlarr" />
-    <button class="btn btn-p btn-sm" style="margin-top:4px" onclick="loadIndexers()">Conectar e Carregar Indexers</button>
-    <div id="test-log" class="mt8" style="display:none;font-size:11px;color:var(--dim)"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:end">
+      <div>
+        <label>URL</label>
+        <input type="text" id="jackettUrl" placeholder="ex: http://prowlarr:9696" style="margin-bottom:0" />
+      </div>
+      <div>
+        <label>API Key</label>
+        <input type="text" id="jackettKey" placeholder="API Key do Jackett/Prowlarr" style="margin-bottom:0" />
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn btn-p btn-sm" onclick="loadIndexers()">Conectar e Carregar Indexers</button>
+    </div>
   </div>
-
-  <div class="card">
-    <div class="ctitle">StremThru <span style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:1px">Cache Torznab</span></div>
-    <label>URL</label>
-    <input type="text" id="stremthruUrl" placeholder="ex: https://stremthru.13377001.xyz/v0/torznab/api" />
-    <label>API Key <span style="color:var(--dim);font-weight:400;font-size:9px">(opcional)</span></label>
-    <input type="text" id="stremthruKey" placeholder="deixe em branco se não usar" />
-  </div>
-
 
   <div class="card full">
-    <div class="ctitle">Categorias &amp; Limites</div>
+    <div class="ctitle">Filtros &amp; Limites</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div>
         <label>Categorias</label>
@@ -214,30 +212,28 @@ hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
         <div class="anime-info" id="anime-hint" style="display:none">
           Anime usa indexers especializados (Nyaa, AnimeTosho) e busca por episódio.
         </div>
-      </div>
-      <div>
-        <label>Ordenação</label>
-        <div class="tg-group" id="sort-group">
-          <button class="tg on" data-sort="cache">Cache primeiro</button>
-          <button class="tg" data-sort="resolution">Resolução</button>
-          <button class="tg" data-sort="size">Tamanho</button>
-          <button class="tg" data-sort="seeders">Seeders</button>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="tg on" id="skipBadBtn">Skip CAM/TS</button>
+          <button class="tg on" id="onlyLangBtn">Apenas idioma</button>
         </div>
       </div>
-    </div>
-    <hr/>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;align-items:end">
       <div>
-        <label>Máx Resultados</label>
-        <input type="number" id="maxResults" value="20" min="5" max="100" style="margin-bottom:0" />
-      </div>
-      <div>
-        <label>Slow Threshold (ms)</label>
-        <input type="number" id="slowThreshold" value="8000" min="1000" max="30000" style="margin-bottom:0" />
-      </div>
-      <div style="display:flex;gap:8px;padding-bottom:2px">
-        <button class="tg on" id="skipBadBtn">Skip CAM/TS</button>
-        <button class="tg on" id="onlyLangBtn">Apenas idioma</button>
+        <label>⭐ Boost por Keywords (Regex)</label>
+        <input type="text" id="keywordBoost" placeholder="ex: (brremux|freddiegellar|dual-bioma)" style="font-size:11px" />
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label>Máx Resultados</label>
+            <input type="number" id="maxResults" value="20" min="5" max="100" style="margin-bottom:0" />
+          </div>
+          <div>
+            <label>Timeout (ms)</label>
+            <input type="number" id="slowThreshold" value="8000" min="1000" max="30000" style="margin-bottom:0" />
+          </div>
+          <div>
+            <label>Máx/Indexer</label>
+            <input type="number" id="maxResultsPerIndexer" value="0" min="0" max="200" style="margin-bottom:0" title="0 = sem limite" />
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -421,7 +417,6 @@ const state = {
   useAll: true,
   priorityLang: 'pt-br',
   debridMode: 'dual',
-  sortMode: 'cache',
 };
 
 // ── Idioma Prioritário ────────────────────────────────────────────
@@ -556,14 +551,6 @@ document.querySelectorAll('.tg[data-cat]').forEach(t => {
   });
 });
 
-document.querySelectorAll('#sort-group .tg[data-sort]').forEach(t => {
-  t.addEventListener('click', () => {
-    document.querySelectorAll('#sort-group .tg').forEach(b => b.classList.remove('on'));
-    t.classList.add('on');
-    state.sortMode = t.dataset.sort;
-  });
-});
-
 document.getElementById('skipBadBtn').addEventListener('click', function() { this.classList.toggle('on'); });
 document.getElementById('onlyLangBtn').addEventListener('click', function() { this.classList.toggle('on'); });
 
@@ -572,10 +559,8 @@ function getCats() { return [...document.querySelectorAll('.tg[data-cat].on')].m
 async function loadEnv() {
   try {
     const env = await fetch('/api/env').then(r => r.json());
-    if (env.jackettUrl)   document.getElementById('jackettUrl').value   = env.jackettUrl;
-    if (env.jackettKey)   document.getElementById('jackettKey').value   = env.jackettKey;
-    if (env.stremthruUrl) document.getElementById('stremthruUrl').value = env.stremthruUrl;
-    if (env.stremthruKey) document.getElementById('stremthruKey').value = env.stremthruKey;
+    if (env.jackettUrl) document.getElementById('jackettUrl').value = env.jackettUrl;
+    if (env.jackettKey) document.getElementById('jackettKey').value = env.jackettKey;
     dot('redis', env.redisOk ? 'ok' : 'err');
     label('redis', env.redisOk ? `Redis` : 'Redis (offline)');
   } catch {}
@@ -729,10 +714,8 @@ function buildPrefs() {
   const selected  = state.selectedIndexers.length ? state.selectedIndexers : ['all'];
   const isNative  = document.getElementById('useNativeDebrid').checked;
 
-  const jackettUrl   = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
-  const jackettKey   = document.getElementById('jackettKey').value.trim();
-  const stremthruUrl = document.getElementById('stremthruUrl').value.trim().replace(/\/+$/, '');
-  const stremthruKey = document.getElementById('stremthruKey').value.trim();
+  const jackettUrl = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
+  const jackettKey = document.getElementById('jackettKey').value.trim();
 
   const prefs = {
     indexers:        state.useAll ? ['all'] : selected,
@@ -743,12 +726,12 @@ function buildPrefs() {
     skipBadReleases: document.getElementById('skipBadBtn').classList.contains('on'),
     priorityLang:    state.priorityLang,
     onlyDubbed:      document.getElementById('onlyLangBtn').classList.contains('on'),
-    sortMode:        state.sortMode,
     debrid:          isNative,
+    keywordBoost:    document.getElementById('keywordBoost').value.trim(),
+    maxResultsPerIndexer: +document.getElementById('maxResultsPerIndexer').value || 0,
   };
 
   if (jackettUrl) prefs.jackett = { url: jackettUrl, key: jackettKey };
-  if (stremthruUrl) prefs.stremthru = { url: stremthruUrl, key: stremthruKey };
 
   // ── Debrid Nativo ──────────────────────────────────────
   if (isNative) {
@@ -777,10 +760,6 @@ function generate() {
     const encoded = encodeBaseURL(prefs);
     const finalManifestUrl = `${location.origin}/${encoded}/manifest.json`;
     const finalStremioUrl  = `stremio://${location.host}/${encoded}/manifest.json`;
-
-    if (prefs.stConfig && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      alert("⚠️ AVISO: Usando 'localhost', o StremThru remoto não conseguirá alcançar este ProwJack. Use seu IP ou domínio público!");
-    }
 
     document.getElementById('ibox-url').textContent = finalManifestUrl;
     document.getElementById('ibox-url').className   = 'ibox-url';
