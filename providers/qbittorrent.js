@@ -15,7 +15,7 @@ const QBIT_PASS = process.env.QBIT_PASS || "";
 const QBIT_SAVE_DIR = process.env.QBIT_SAVE_DIR || "/downloads/prowjack";
 const QBIT_CATEGORY = process.env.QBIT_CATEGORY || "prowjack-private";
 const MIN_PROGRESS = Math.min(1, Math.max(0.005, parseFloat(process.env.QBIT_MIN_PROGRESS || "0.02")));
-const BUFFER_TIMEOUT = parseInt(process.env.QBIT_BUFFER_TIMEOUT || "120", 10);
+const BUFFER_TIMEOUT = parseInt(process.env.QBIT_BUFFER_TIMEOUT || "180", 10);
 const POLL_INTERVAL = 3000;
 
 let sessionCookie = null;
@@ -218,7 +218,6 @@ async function waitForBuffer(infoHash, fileIdx, fileName) {
 
     const files = await getTorrentFiles(infoHash);
     const target = pickTargetFile(files, fileIdx, fileName);
-    // Sem arquivos ainda (metadados não chegaram) — aguarda
     if (!target) { await sleep(POLL_INTERVAL); continue; }
 
     const progress = Number(target.progress || 0);
@@ -228,7 +227,7 @@ async function waitForBuffer(infoHash, fileIdx, fileName) {
 
     await sleep(POLL_INTERVAL);
   }
-  // Timeout — retorna o que tiver sem lançar erro
+  
   const info = await getTorrentInfo(infoHash).catch(() => null);
   const files = info ? await getTorrentFiles(infoHash).catch(() => []) : [];
   return { info, file: files.length ? pickTargetFile(files, fileIdx, fileName) : null };
@@ -253,15 +252,29 @@ async function getPlayableLocalFile(infoHash, fileIdx, fileName) {
 }
 
 function resolveFilePath(info, file) {
-  const relative = String(file.name || "").replace(/^\/+/, "");
-  // content_path pode ser caminho do host (fora do container) — sempre reconstruir via QBIT_SAVE_DIR
+  const relative = String(file.name || "").replace(/^\/+/, "").replace(/\.\./g, "");
+  if (!relative || relative.includes("..")) {
+    throw new Error("Path traversal detectado");
+  }
   const byDir = path.join(QBIT_SAVE_DIR, relative);
-  if (fs.existsSync(byDir)) return byDir;
-  // Fallback: content_path (funciona se addon roda no host)
+  if (fs.existsSync(byDir)) {
+    const resolved = path.resolve(byDir);
+    const base = path.resolve(QBIT_SAVE_DIR);
+    if (!resolved.startsWith(base)) {
+      throw new Error("Path fora do diretório permitido");
+    }
+    return byDir;
+  }
   const root = info.content_path || path.join(QBIT_SAVE_DIR, info.name || "");
   const normalizedRoot = path.normalize(root);
   if (normalizedRoot.endsWith(path.normalize(relative))) return normalizedRoot;
-  return path.join(normalizedRoot, relative);
+  const finalPath = path.join(normalizedRoot, relative);
+  const resolvedFinal = path.resolve(finalPath);
+  const baseResolved = path.resolve(QBIT_SAVE_DIR);
+  if (!resolvedFinal.startsWith(baseResolved)) {
+    throw new Error("Path fora do diretório permitido");
+  }
+  return finalPath;
 }
 
 async function streamTorrentFile(req, res, infoHash, fileIdx, fileName) {
