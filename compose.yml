@@ -3,11 +3,11 @@ services:
     build: .
     container_name: prowjack
     restart: unless-stopped
-#    network_mode: "service:gluetun"
-    networks:
-      - npm-net
-    ports:
-      - "7014:7014"
+    network_mode: "service:gluetun"
+#    networks:
+#      - npm-net
+#    ports:
+#      - "7014:7014"
     env_file:
       - ./.env
     environment:
@@ -16,10 +16,7 @@ services:
     volumes:
       - /media/vinicius/Arquivos:/data             # ← compartilhado com qBittorrent
 
-networks:
-  npm-net:
-    external: true
-    name: server_npm-net
+
 
 
 

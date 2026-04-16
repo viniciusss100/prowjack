@@ -185,6 +185,7 @@ async function torboxAddTorrent(magnet, key, addOnlyIfCached = false, torrentBuf
       if (tId !== undefined && tId !== null) return tId;
       return true;
     }
+    console.log(`[TorBox] createtorrent falhou: HTTP ${res.status} — ${JSON.stringify(res.data)}`);
     return false;
   } catch { return false; }
 }
@@ -260,7 +261,6 @@ async function rdBatchCheckCache(hashes, key, bufferMap = {}) {
         }
       }
     } catch (err) {
-      console.log(`  [RD Batch] Erro para ${hash}: ${err.message}`);
       if (torrentId) axios.delete(`https://api.real-debrid.com/rest/1.0/torrents/delete/${torrentId}`,
         { headers: headersAuth, timeout: 6000 }).catch(() => {});
     }
@@ -325,7 +325,6 @@ async function rdGetDirectLink(hash, magnet, fileIds, key, torrentBuffer = null)
   if (existing) {
     torrentId = existing.id;
     isExisting = true;
-    console.log(`  [Real-Debrid] Reutilizando torrent existente ${torrentId} para ${hash}`);
   } else {
     try {
       if (torrentBuffer) {
@@ -457,20 +456,16 @@ async function _resolveTorbox(infoHash, magnet, season, episode, isAnime, key, t
 
     if (torrentId != null) {
       const url = torboxBuildPermalink(torrentId, picked.fileId, key);
-      console.log(`  [TorBox] Cache HIT para ${infoHash}`);
       return { url, provider: "TorBox", filename: picked.name || null };
     }
 
     // Fallback: sem ID no cache entry (ou entry === true), adiciona para obter o ID
-    console.log(`  [TorBox] Cache HIT (sem ID) para ${infoHash} — adicionando para obter ID`);
     const addedTorrentId = await torboxAddTorrent(magnet, key, true, torrentBuffer);
     if (addedTorrentId && addedTorrentId !== true) {
       const url = torboxBuildPermalink(addedTorrentId, picked.fileId, key);
-      console.log(`  [TorBox] Cache HIT (via add fallback) para ${infoHash}`);
       return { url, provider: "TorBox", filename: picked.name || null };
     }
   }
-  console.log(`  [TorBox] Cache MISS para ${infoHash} — aguardando clique para enfileirar`);
   return { queued: true, provider: "TorBox" };
 }
 
@@ -493,7 +488,6 @@ async function _resolveRD(infoHash, magnet, season, episode, isAnime, key, rdCac
           { headers: { ...headersAuth, "Content-Type": "application/x-www-form-urlencoded" }, timeout: 12000 });
         const downloadUrl = unresRes.data?.download;
         if (downloadUrl) {
-          console.log(`  [Real-Debrid] Cache HIT (reutilizando torrent do batch) para ${infoHash}`);
           await axios.delete(`https://api.real-debrid.com/rest/1.0/torrents/delete/${rdCacheEntry._torrentId}`,
             { headers: headersAuth, timeout: 6000 }).catch(() => {});
           return { url: downloadUrl, provider: "Real-Debrid", filename: unresRes.data?.filename || null };
@@ -503,17 +497,14 @@ async function _resolveRD(infoHash, magnet, season, episode, isAnime, key, rdCac
 
     const result = await rdGetDirectLink(infoHash, magnet, fileIds, key, torrentBuffer);
     if (result?.download) {
-      console.log(`  [Real-Debrid] Cache HIT para ${infoHash}`);
       return { url: result.download, provider: "Real-Debrid", filename: result.filename || null };
     }
   }
-  console.log(`  [Real-Debrid] Cache MISS para ${infoHash} — verificando se já está na conta...`);
   // Torrent pode ter sido adicionado anteriormente (via on-demand ou batch); verifica antes de retornar queued
   const existing = await rdFindExistingTorrent(infoHash, key);
   if (existing?.links?.length) {
     const result = await rdGetDirectLink(infoHash, magnet, ["all"], key, torrentBuffer);
     if (result?.download) {
-      console.log(`  [Real-Debrid] Encontrado na conta (já baixado)! ${infoHash}`);
       return { url: result.download, provider: "Real-Debrid", filename: result.filename || null };
     }
   }

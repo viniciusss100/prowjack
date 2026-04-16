@@ -17,8 +17,27 @@ const {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use((_, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+
+// Rate limiting simples
+const requestCounts = new Map();
+setInterval(() => requestCounts.clear(), 60000);
+
+app.use((req, res, next) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+  const count = requestCounts.get(ip) || 0;
+  if (count > 100) {
+    return res.status(429).json({ error: "Rate limit excedido" });
+  }
+  requestCounts.set(ip, count + 1);
+  next();
+});
+
+app.use((req, res, next) => {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || ["*"];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes("*") || (origin && allowedOrigins.includes(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  }
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   next();
@@ -32,12 +51,6 @@ const ENV = {
   apiKey:         (process.env.JACKETT_API_KEY || "").trim(),
   port:           process.env.PORT || 7014,
   redisUrl:       process.env.REDIS_URL || "redis://localhost:6379",
-  stremthruUrl:   (process.env.STREMTHRU_URL  || "").trim(),
-  stremthruKey:   (process.env.STREMTHRU_API_KEY || "").trim(),
-  zileanUrl:      (process.env.ZILEAN_URL || "").trim(),
-  zileanKey:      (process.env.ZILEAN_API_KEY || "").trim(),
-  bitmagnetUrl:   (process.env.BITMAGNET_URL || "").trim(),
-  bitmagnetKey:   (process.env.BITMAGNET_API_KEY || "").trim(),
   addonPublicUrl: (process.env.ADDON_PUBLIC_URL || "").trim().replace(/\/+$/, ""),
 };
 // ─────────────────────────────────────────────────────────
@@ -47,8 +60,12 @@ let redis = null;
 const memoryStore = new Map();
 try {
   redis = new Redis(ENV.redisUrl, { lazyConnect: true, enableOfflineQueue: false });
-  redis.on("error", () => {});
-} catch {}
+  redis.on("connect", () => console.log(`✅ Redis conectado: ${ENV.redisUrl}`));
+  redis.on("error", (err) => console.log(`❌ Redis erro: ${err.message}`));
+  redis.on("close", () => console.log(`⚠️ Redis desconectado`));
+} catch (err) {
+  console.log(`❌ Redis falha na inicialização: ${err.message}`);
+}
 
 function memoryGet(k) {
   const entry = memoryStore.get(k);
@@ -67,6 +84,17 @@ function memorySet(k, v, ttl) {
 function memoryDel(k) {
   memoryStore.delete(k);
 }
+
+function cleanExpiredMemory() {
+  const now = Date.now();
+  for (const [key, entry] of memoryStore.entries()) {
+    if (entry.expiresAt && entry.expiresAt <= now) {
+      memoryStore.delete(key);
+    }
+  }
+}
+
+setInterval(cleanExpiredMemory, 60000);
 
 const rc = {
   async get(k) {
@@ -98,7 +126,7 @@ const rc = {
     return memoryKeys;
   },
 };
-const CACHE_VERSION = "v11-stremthru-qbit";
+const CACHE_VERSION = "v12-native-debrid";
 
 function getPublicBase(req) {
   if (ENV.addonPublicUrl) return ENV.addonPublicUrl;
@@ -119,20 +147,7 @@ async function loadQbitJob(token) {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function getStremThruBase(url) {
-  const u = url || ENV.stremthruUrl;
-  if (!u) return null;
-  const match = u.match(/^(https?:\/\/[^/]+)/);
-  return match ? match[1] : null;
-}
 
-const STREMTHRU_STORE_MAP = {
-  realdebrid: "realdebrid",
-  torbox: "torbox",
-  alldebrid: "alldebrid",
-  premiumize: "premiumize",
-  debridlink: "debridlink",
-};
 // ─────────────────────────────────────────────────────────
 // INDEXERS (ISOLAMENTO DE ANIME)
 // ─────────────────────────────────────────────────────────
@@ -150,20 +165,24 @@ function isAnimeOnly(id) {
 }
 let _ixCache   = null;
 let _ixCacheAt = 0;
-async function getCachedIndexers() {
-  if (_ixCache && Date.now() - _ixCacheAt < 300_000) return _ixCache;
+async function getCachedIndexers(jUrl, jKey) {
+  const cacheKey = `${jUrl}:${jKey}`;
+  if (_ixCache && _ixCache.key === cacheKey && Date.now() - _ixCacheAt < 300_000) return _ixCache.data;
   try {
-    _ixCache   = await jackettFetchIndexers();
+    const data = await jackettFetchIndexers(jUrl, jKey);
+    _ixCache   = { key: cacheKey, data };
     _ixCacheAt = Date.now();
+    return data;
   } catch {
-    _ixCache = _ixCache || [];
+    return _ixCache?.data || [];
   }
-  return _ixCache;
 }
 async function resolveSearchIndexers(prefs, isAnime) {
+  const jUrl = (prefs?.jackett?.url || ENV.jackettUrl).replace(/\/+$/, "");
+  const jKey = prefs?.jackett?.key || ENV.apiKey;
   const selected = (Array.isArray(prefs.indexers) ? prefs.indexers : []).filter(Boolean);
   const useAll   = !selected.length || selected.includes("all");
-  const allList  = await getCachedIndexers();
+  const allList  = await getCachedIndexers(jUrl, jKey);
   const pool     = useAll ? allList.map(ix => ix.id) : selected;
   if (isAnime) {
     const animePool = pool.filter(id => isAnimeOnly(id));
@@ -189,8 +208,11 @@ async function setRateLimit(indexer, retryAfterHeader) {
 // ─────────────────────────────────────────────────────────
 function decodeUserCfg(str) {
   try {
+    if (!str || typeof str !== "string" || str.length > 10000) return null;
     const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+    if (typeof decoded !== "object" || Array.isArray(decoded)) return null;
+    return decoded;
   } catch { return null; }
 }
 function defaultPrefs() {
@@ -205,6 +227,8 @@ function defaultPrefs() {
     onlyDubbed:      false,
     debrid:          false,
     debridConfig:    null,
+    keywordBoost:           "",
+    maxResultsPerIndexer:   0,
   };
 }
 function resolvePrefs(encoded) {
@@ -273,8 +297,14 @@ const LANG = [
   { re: /(espa[nñ]ol|spanish|\besp\b)/i,                           code: "es",    emoji: "🇪🇸", label: "ES"    },
   { re: /(fran[cç]ais|french|\bfre\b)/i,                           code: "fr",    emoji: "🇫🇷", label: "FR"    },
 ];
-const first    = (map, t) => map.find(e => e.re.test(t));
-const matchAll = (map, t) => map.filter(e => e.re.test(t));
+const first    = (map, t) => {
+  if (!Array.isArray(map) || !t) return null;
+  return map.find(e => e?.re?.test(t));
+};
+const matchAll = (map, t) => {
+  if (!Array.isArray(map) || !t) return [];
+  return map.filter(e => e?.re?.test(t));
+};
 const uniq     = arr => [...new Set(arr.filter(Boolean))];
 const normTitle = s => (s || "").replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 function qp(extra = {}) {
@@ -288,8 +318,12 @@ function qp(extra = {}) {
 function getLangs(title, isAnime) {
   const langs  = matchAll(LANG, title);
   const isDual = /(dual)[-.\\s]?(audio|2\.1|5\.1)?/i.test(title);
-  if (isDual && !isAnime && !langs.some(l => l.code === "pt-br")) {
-    langs.push({ code: "pt-br", emoji: "🇧🇷", label: "PT-BR" });
+  const hasPtBr = langs.some(l => l.code === "pt-br");
+  
+  // Só adiciona PT-BR ao dual se já tiver PT-BR explícito no título
+  if (isDual && !isAnime && hasPtBr) {
+    // Já tem PT-BR detectado, não precisa adicionar
+    return langs;
   }
   return langs;
 }
@@ -454,25 +488,49 @@ function normalizeForDedupe(str) {
   if (!str) return null;
   return str
     .replace(/[\[\(][^\]\)]*[\]\)]/g, '')
-    .replace(/⚡ |✅ |💾|🇧🇷|🔍|📡|🎬|🎥|📺|🎞️|🎧|🗣️|📦|🌱|🏷️|⚠️|💿|🌐|🖥️|📼|📀/g, '')
-    .replace(/\b(dual|dub|leg|pt\.?br|portuguese|4k|1080p|720p|480p|remux|bluray|webrip|web\.dl|hdtv|hdrip|brrip|dvdrip|hevc|x264|x265|aac|ac3|10bit)\b/gi, '')
+    .replace(/⚡|✅|💾|🇧🇷|🔍|📡|🎬|🎥|📺|🎞️|🎧|🗣️|📦|🌱|🏷️|⚠️|💿|🌐|🖥️|📼|📀|🇺🇸|🇪🇸|🇫🇷/g, '')
+    .replace(/\b(dual|dub|leg|pt\.?br|portuguese|english|spanish|4k|2160p|1440p|1080p|720p|576p|480p|remux|bluray|blu-ray|webrip|web-dl|web\.dl|hdtv|hdrip|brrip|dvdrip|hevc|x264|x265|h\.264|h\.265|av1|aac|ac3|dd\+?|eac3|atmos|truehd|dts|10bit|8bit|hdr10?\+?|dolby.?vision|proper|repack|extended)\b/gi, '')
     .replace(/[^a-z0-9\s]/gi, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
+
 function dedupeResults(results) {
-  const seenHash = new Set(), seenTitleSize = new Set(), deduped = [];
+  const seenHash = new Set();
+  const seenNormalized = new Map();
+  const deduped = [];
+
   for (const r of results) {
     const hash = r.InfoHash ? r.InfoHash.toLowerCase() : null;
+    
+    // Prioridade 1: InfoHash
     if (hash) {
       if (seenHash.has(hash)) continue;
       seenHash.add(hash);
       deduped.push(r);
-    } else {
-      const titleKey = `${(r.Title || "").toLowerCase().trim()}|${r.Size || 0}`;
-      if (seenTitleSize.has(titleKey)) continue;
-      seenTitleSize.add(titleKey);
-      deduped.push(r);
+      continue;
     }
+
+    // Prioridade 2: Título normalizado + tamanho aproximado
+    const normalized = normalizeForDedupe(r.Title || "");
+    if (!normalized) continue;
+
+    const sizeGB = Math.round((r.Size || 0) / 1e8) / 10; // Arredonda para 0.1 GB
+    const key = `${normalized}|${sizeGB}`;
+
+    const existing = seenNormalized.get(key);
+    if (existing) {
+      // Mantém o que tiver mais seeders ou InfoHash
+      if ((r.Seeders || 0) > (existing.Seeders || 0) || (r.InfoHash && !existing.InfoHash)) {
+        const idx = deduped.indexOf(existing);
+        if (idx !== -1) deduped[idx] = r;
+        seenNormalized.set(key, r);
+      }
+      continue;
+    }
+
+    seenNormalized.set(key, r);
+    deduped.push(r);
   }
+
   return deduped;
 }
 
@@ -500,12 +558,16 @@ function extractInfoHash(magnet) {
   return null;
 }
 function extractInfoBuf(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length === 0 || buf.length > 10 * 1024 * 1024) return null;
   const s   = buf.toString("latin1");
   const pos = s.indexOf("4:info");
   if (pos === -1) return null;
   let i = pos + 6, depth = 0;
   const start = i;
-  while (i < s.length) {
+  const maxIterations = 1000000;
+  let iterations = 0;
+  while (i < s.length && iterations < maxIterations) {
+    iterations++;
     const c = s[i];
     if      (c === "d" || c === "l") { depth++; i++; }
     else if (c === "e")              { depth--; i++; if (depth === 0) break; }
@@ -513,8 +575,14 @@ function extractInfoBuf(buf) {
     else if (c >= "0" && c <= "9")  {
       const colon = s.indexOf(":", i);
       if (colon === -1) break;
-      i = colon + 1 + parseInt(s.slice(i, colon), 10);
+      const len = parseInt(s.slice(i, colon), 10);
+      if (!Number.isFinite(len) || len < 0 || len > buf.length) break;
+      i = colon + 1 + len;
     } else i++;
+  }
+  if (iterations >= maxIterations) {
+    console.warn("[SECURITY] extractInfoBuf: loop excessivo detectado");
+    return null;
   }
   return depth === 0 ? buf.slice(start, i) : null;
 }
@@ -619,11 +687,18 @@ async function resolveInfoHash(r) {
   }
 
   if (httpLink) {
+    let _magnetRedirect = null;
     try {
       const res = await axios.get(httpLink, {
         timeout: 10000, maxRedirects: 10, responseType: "arraybuffer",
         maxContentLength: 8 * 1024 * 1024, validateStatus: s => s < 400,
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        beforeRedirect: (options) => {
+          if (options.href?.startsWith("magnet:")) {
+            _magnetRedirect = options.href;
+            throw Object.assign(new Error("magnet_redirect"), { isMagnetRedirect: true });
+          }
+        },
       });
       const finalUrl = res.request?.res?.responseUrl || "";
       if (finalUrl.startsWith("magnet:")) {
@@ -631,26 +706,37 @@ async function resolveInfoHash(r) {
         return h ? { infoHash: h, files: null, buffer: null } : null;
       }
       const buf = Buffer.from(res.data);
+      if (buf.length > 8 * 1024 * 1024) {
+        console.warn(`[SECURITY] Torrent muito grande: ${buf.length} bytes`);
+        return null;
+      }
       const bodyStr = buf.toString("utf8", 0, Math.min(buf.length, 200));
       if (bodyStr.trimStart().startsWith("magnet:")) {
         const h = extractInfoHash(bodyStr.trim());
         return h ? { infoHash: h, files: null, buffer: null } : null;
       }
-      if (buf[0] === 0x64) { // Assinatura de um dicionário bencode (d)
+      if (buf[0] === 0x64) {
         const infoBuf = extractInfoBuf(buf);
         if (infoBuf) {
           const realHash = crypto.createHash("sha1").update(infoBuf).digest("hex");
           return {
-            infoHash: realHash, // Hash verdadeiro!
+            infoHash: realHash,
             files: extractTorrentFiles(buf),
-            buffer: buf, // Arquivo guardado para upload no Debrid
+            buffer: buf,
           };
         }
       }
-    } catch {}
+    } catch (err) {
+      if (_magnetRedirect || err.isMagnetRedirect || err.cause?.isMagnetRedirect) {
+        const src = _magnetRedirect || err.cause?.magnetUrl;
+        const h = src ? extractInfoHash(src) : null;
+        if (h) return { infoHash: h, files: null, buffer: null };
+      } else {
+        console.warn(`[WARN] Falha ao baixar torrent: ${err.message}`);
+      }
+    }
   }
 
-  // Fallback para o InfoHash do Jackett se o download falhar
   if (fallbackHash) return { infoHash: fallbackHash, files: null, buffer: null };
   return null;
 }
@@ -676,7 +762,27 @@ function renameIndexer(name) {
 // ─────────────────────────────────────────────────────────
 // FORMATTER
 // ─────────────────────────────────────────────────────────
-function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = true) {
+function matchesKeywordBoost(title, boostFilter) {
+  if (!boostFilter || !boostFilter.trim()) return false;
+  const pattern = boostFilter.trim();
+  if (pattern.length > 500) return false;
+  try {
+    const regex = new RegExp(pattern, "i");
+    const testStr = String(title || "").slice(0, 500);
+    const timeoutMs = 100;
+    const start = Date.now();
+    const result = regex.test(testStr);
+    if (Date.now() - start > timeoutMs) {
+      console.warn(`[SECURITY] Regex timeout detectado: ${pattern}`);
+      return false;
+    }
+    return result;
+  } catch {
+    return title.toLowerCase().includes(pattern.toLowerCase());
+  }
+}
+
+function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = true, streamMeta = {}) {
   const t      = r.Title || "";
   const res    = first(RESOLUTION, t);
   const qual   = first(QUALITY, t);
@@ -698,7 +804,16 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = t
   else if (isMulti && !langs.some(l => l.code === "pt-br")) langDisplay.push("🎧 Multi");
   const p2pLabel = prefs.debrid ? "" : "⚠️ P2P";
   const langStr  = langDisplay.join(" | ");
+
+  // Título no topo da descrição
+  const titleLine = [
+    streamMeta.title ? `🎬 ${streamMeta.title}` : "",
+    streamMeta.year ? `(${streamMeta.year})` : "",
+    streamMeta.formattedSeasons ? `🍂 ${streamMeta.formattedSeasons}` : ""
+  ].filter(Boolean).join(" ");
+
   const desc = [
+    titleLine,
     [qual ? `🎥 ${qual.label}` : "", vis.length ? `📺 ${vis.map(v=>v.label).join(" | ")}` : "", codec ? `🎞️ ${codec.label}` : "", langStr].filter(Boolean).join("  "),
     [audios.length ? `🎧 ${audios.map(a=>a.label).join(" | ")}` : ""].filter(Boolean).join("  "),
     [size ? `📦 ${size}` : "", showSeeds && seeds > 0 ? `🌱 ${seeds} seeds` : ""].filter(Boolean).join("  "),
@@ -710,182 +825,16 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = t
 // ─────────────────────────────────────────────────────────
 // JACKETT + SEARCH
 // ─────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-// TORZNAB CACHE SOURCES (StremThru, Zilean, Bitmagnet)
-// Fontes externas que indexam conteúdo já cacheado nos debrids.
-// Hashes encontrados aqui são marcados como cached mesmo sem confirmação da API do debrid.
-// ─────────────────────────────────────────────────────────────────────────────
-
-function normalizeTorznabHash(raw) {
-  if (!raw) return null;
-  const s = raw.trim().toLowerCase();
-  if (/^[0-9a-f]{40}$/.test(s)) return s;
-  if (/^[a-z2-7]{32}$/.test(s)) return base32ToHex(s) || null;
-  return null;
-}
-
-async function fetchTorznabHashes(url, apiKey, paramsList) {
-  const allHashes = new Set();
-  for (const params of paramsList) {
-    if (apiKey) params.set("apikey", apiKey);
-    try {
-      const res = await axios.get(`${url}?${params.toString()}`, { timeout: 8000, validateStatus: s => s < 500 });
-      if (res.status >= 500) break;
-      if (!res.data) continue;
-      const xml = typeof res.data === "string" ? res.data : JSON.stringify(res.data);
-      for (const m of xml.matchAll(/name="infohash"\s+value="([^"]+)"/gi)) {
-        const h = normalizeTorznabHash(m[1]); if (h) allHashes.add(h);
-      }
-      for (const m of xml.matchAll(/xt=urn:btih:([a-zA-Z0-9]{32,40})/gi)) {
-        const h = normalizeTorznabHash(m[1]); if (h) allHashes.add(h);
-      }
-    } catch {}
-  }
-  return [...allHashes];
-}
-
-async function searchCacheSources({ q, imdbId, type }, prefs) {
-  const stUrl = prefs?.stremthru?.url || ENV.stremthruUrl;
-  const stKey = prefs?.stremthru?.key || ENV.stremthruKey;
-  const sources = [
-    { name: "stremthru", url: stUrl,           key: stKey            },
-    { name: "zilean",    url: ENV.zileanUrl,    key: ENV.zileanKey    },
-    { name: "bitmagnet", url: ENV.bitmagnetUrl, key: ENV.bitmagnetKey },
-  ].filter(s => s.url);
-
-  if (!sources.length) return new Set();
-
-  const isMovie  = !type || type === "movie";
-  const isSeries = type === "series";
-
-  const results = await Promise.allSettled(sources.map(async ({ name, url, key }) => {
-    const paramsList = [];
-    const cleanImdb = imdbId ? imdbId.replace("tt", "") : null;
-
-    if (name === "zilean") {
-      if (cleanImdb) {
-        if (isMovie)  paramsList.push(new URLSearchParams({ t: "movie",    imdbid: cleanImdb }));
-        if (isSeries) paramsList.push(new URLSearchParams({ t: "tvsearch", imdbid: cleanImdb }));
-        paramsList.push(new URLSearchParams({ t: "search", imdbid: cleanImdb }));
-      }
-      if (q) paramsList.push(new URLSearchParams({ t: "search", q }));
-    } else if (name === "stremthru") {
-      if (cleanImdb) {
-        if (isMovie)  paramsList.push(new URLSearchParams({ t: "movie",    imdbid: cleanImdb, cat: "2000" }));
-        if (isSeries) paramsList.push(new URLSearchParams({ t: "tvsearch", imdbid: cleanImdb, cat: "5000" }));
-      }
-      if (q) paramsList.push(new URLSearchParams({ t: "search", q }));
-    } else {
-      if (cleanImdb) paramsList.push(new URLSearchParams({ t: "search", imdbid: cleanImdb }));
-      if (q)         paramsList.push(new URLSearchParams({ t: "search", q }));
-    }
-
-    const t0 = Date.now();
-    const hashes = await fetchTorznabHashes(url, key, paramsList);
-    console.log(`[TORZNAB:${name.toUpperCase()}] ${Date.now() - t0}ms | hashes=${hashes.length}`);
-    return hashes;
-  }));
-
-  const all = results.flatMap(r => r.status === "fulfilled" ? r.value : []);
-  return new Set(all);
-}
-
-async function checkCacheViaStremThru(hashes, store, apiKey, stremthruUrl) {
-  const base = getStremThruBase(stremthruUrl);
-  const storeName = STREMTHRU_STORE_MAP[store] || store;
-  if (!base || !storeName || !apiKey || !Array.isArray(hashes) || !hashes.length) return new Set();
-
-  const normalized = [...new Set(hashes.map(h => String(h || "").toLowerCase()).filter(h => /^[0-9a-f]{40}$/.test(h)))];
-  if (!normalized.length) return new Set();
-
-  const cachedHashes = new Set();
-  const pending = [];
-
-  for (const hash of normalized) {
-    const cached = await rc.get(`stremthru:${storeName}:${hash}`);
-    if (cached === "1") cachedHashes.add(hash);
-    else if (cached !== "0") pending.push(hash);
-  }
-
-  // Determina o header de autenticação correto:
-  // Se apiKey contém ":" é user:pass (Basic), senão é Bearer token
-  const authHeader = apiKey.includes(":")
-    ? `Basic ${Buffer.from(apiKey).toString("base64")}`
-    : `Bearer ${apiKey}`;
-
-  const CHUNK = 500;
-  for (let i = 0; i < pending.length; i += CHUNK) {
-    const chunk = pending.slice(i, i + CHUNK);
-    try {
-      const url = `${base}/v0/store/magnets/check`;
-      const body = JSON.stringify({ hashes: chunk });
-      let res = null;
-      try {
-        res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-StremThru-Store-Name": storeName,
-            "Authorization": authHeader,
-          },
-          body,
-          signal: AbortSignal.timeout(10000),
-        });
-      } catch { continue; }
-
-      if (!res.ok) {
-        // Tenta endpoint alternativo GET com query params
-        const urlAlt = `${base}/v0/store/magnets/check?magnet=${chunk.map(h => `magnet:?xt=urn:btih:${h}`).join("&magnet=")}`;
-        let res2 = null;
-        try {
-          res2 = await fetch(urlAlt, {
-            headers: {
-              "X-StremThru-Store-Name": storeName,
-              "Authorization": authHeader,
-            },
-            signal: AbortSignal.timeout(10000),
-          });
-        } catch { continue; }
-        if (!res2?.ok) continue;
-        const data2 = await res2.json().catch(() => null);
-        if (!data2) continue;
-        const chunkHits = new Set();
-        for (const item of (data2?.data?.items || [])) {
-          const h = String(item?.hash || "").toLowerCase();
-          if (item?.status === "cached" && /^[0-9a-f]{40}$/.test(h)) { chunkHits.add(h); cachedHashes.add(h); }
-        }
-        await Promise.allSettled(chunk.map(h => rc.set(`stremthru:${storeName}:${h}`, chunkHits.has(h) ? "1" : "0", 1800)));
-        continue;
-      }
-
-      const data = await res.json().catch(() => null);
-      if (!data) continue;
-      const chunkHits = new Set();
-      for (const item of (data?.data?.items || [])) {
-        const h = String(item?.hash || "").toLowerCase();
-        if (item?.status === "cached" && /^[0-9a-f]{40}$/.test(h)) {
-          chunkHits.add(h);
-          cachedHashes.add(h);
-        }
-      }
-
-      await Promise.allSettled(
-        chunk.map(h => rc.set(`stremthru:${storeName}:${h}`, chunkHits.has(h) ? "1" : "0", 1800))
-      );
-    } catch { /* silencioso */ }
-  }
-
-  console.log(`[StremThruCache] store=${storeName} | ${cachedHashes.size} cached de ${normalized.length} hashes`);
-  return cachedHashes;
-}
 
 async function jackettFetchIndexers(url, key) {
   const jUrl = (url || ENV.jackettUrl).replace(/\/+$/, "");
   const jKey = key || ENV.apiKey;
   // Jackett: t=indexers retorna XML com lista de indexers sem executar busca
   try {
+    const params = { t: "indexers", configured: "true" };
+    if (jKey) params.apikey = jKey;
     const res = await axios.get(`${jUrl}/api/v2.0/indexers/all/results/torznab/api`, {
-      params: qp({ t: "indexers", configured: "true" }), timeout: 8000,
+      params, timeout: 8000,
       responseType: "text", validateStatus: () => true,
     });
     if (res.status < 400 && typeof res.data === "string") {
@@ -999,11 +948,13 @@ async function prowlarrSearch(query, indexer, limit = 50, jUrl, jKey) {
 }
 
 async function jackettTextSearch(query, indexer, timeout, jUrl, jKey) {
+  const params = { Query: query };
+  if (jKey) params.apikey = jKey;
   const res = await axios.get(
     `${jUrl}/api/v2.0/indexers/${indexer}/results`,
-    { params: qp({ Query: query }), timeout, validateStatus: () => true }
+    { params, timeout, validateStatus: () => true }
   );
-  if (res.status === 404) return prowlarrSearch(query, indexer, 50, jUrl, jKey);
+  if (res.status === 404 || res.status === 401) return prowlarrSearch(query, indexer, 50, jUrl, jKey);
   if (res.status === 429) throw Object.assign(new Error("Rate limited"), { response: res });
   if (res.status >= 400) throw new Error(`HTTP ${res.status}`);
   return (res.data?.Results || []).map(r => ({ ...r, _structuredMatch: false }));
@@ -1031,18 +982,26 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
   const t0 = Date.now();
   try {
     let results = [];
-    if (plan.search && !plan.parsed?.isAnime) {
+    // Desabilita busca estruturada para séries (melhor compatibilidade)
+    const isSeries = plan.parsed?.type === 'series' || (plan.search?.season != null);
+    if (plan.search && !plan.parsed?.isAnime && !isSeries) {
       try {
         results = await jackettStructuredSearch(plan.search, indexer, timeout, jUrl, jKey);
       } catch (err) {
+        console.log(`  ${indexer}: erro na busca estruturada: ${err.message}`);
         if (err.response?.status === 429) throw err;
       }
     }
     if (results.length === 0) {
       for (const query of plan.queries) {
-        const textResults = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
-        results.push(...textResults);
-        if (results.length > 0) break;
+        try {
+          const textResults = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
+          results.push(...textResults);
+          if (results.length > 0) break;
+        } catch (err) {
+          console.log(`  ${indexer}: erro na busca por texto "${query}": ${err.message}`);
+          if (err.response?.status === 429) throw err;
+        }
       }
     }
     const ms = Date.now() - t0;
@@ -1052,6 +1011,7 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
     return results;
   } catch (err) {
     const ms = Date.now() - t0;
+    console.log(`  ${indexer}: ERRO FATAL: ${err.message} (${ms}ms)`);
     if (err.response?.status === 429) await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
     if (err.code === "ECONNABORTED" && timeout === fastTimeout)
       console.log(`  ${indexer}: timeout lento de ${ms}ms (indo para background)`);
@@ -1082,16 +1042,16 @@ async function jackettSearch(plan, indexers, prefs) {
     console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
     return JSON.parse(cached);
   }
-  const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 12000);
+  const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 15000);
   const SLOW_TIMEOUT = 50000;
   console.log(`Jackett iniciando busca: "${queryList[0] || plan?.search?.title || "sem titulo"}" em [${indexers.length} indexers]`);
   console.log(`Fase rapida: aguardando respostas... (${FAST_TIMEOUT}ms max)`);
-  
+
   const fastFlat    = (await Promise.all(indexers.map(indexer => jackettSearchOneIndexer(indexer, plan, FAST_TIMEOUT, FAST_TIMEOUT, jUrl, jKey)))).flat();
   const fastDeduped = dedupeResults(fastFlat);
   console.log(`Conclusao da janela rapida: ${fastFlat.length} brutos -> ${fastDeduped.length} deduplicados`);
   
-  if (fastDeduped.length === 0) return []; 
+  // Continua mesmo sem resultados na fase rápida (permite fase lenta e cache sources)
   
   setImmediate(async () => {
     try {
@@ -1155,20 +1115,32 @@ async function getKitsuMeta(kitsuId) {
   }
 }
 function parseStreamId(type, id) {
+  if (!id || typeof id !== "string") return { source: "imdb", isAnime: false, metaId: "unknown", season: null, episode: null, type };
   if (id.startsWith("kitsu:")) {
     const parts = id.split(":");
+    const season = parts[2] ? parseInt(parts[2], 10) : null;
+    const episode = parts[3] ? parseInt(parts[3], 10) : null;
     return {
       source : "kitsu",
       isAnime: true,
-      kitsuId: parts[1],
-      season : parts[2] ? parseInt(parts[2], 10) : null,
-      episode: parts[3] ? parseInt(parts[3], 10) : null,
+      kitsuId: parts[1] || "unknown",
+      season : Number.isFinite(season) ? season : null,
+      episode: Number.isFinite(episode) ? episode : null,
       type,
     };
   }
   if (type === "series" && id.includes(":")) {
     const [metaId, s, e] = id.split(":");
-    return { source: "imdb", isAnime: false, metaId, season: parseInt(s, 10), episode: parseInt(e, 10), type };
+    const season = parseInt(s, 10);
+    const episode = parseInt(e, 10);
+    return { 
+      source: "imdb", 
+      isAnime: false, 
+      metaId: metaId || "unknown", 
+      season: Number.isFinite(season) ? season : null, 
+      episode: Number.isFinite(episode) ? episode : null, 
+      type 
+    };
   }
   return { source: "imdb", isAnime: false, metaId: id, season: null, episode: null, type };
 }
@@ -1253,7 +1225,7 @@ app.get("/api/debrid/test/:provider", async (req, res) => {
 app.get("/api/env",     async (_, res) => {
   let redisOk = false;
   try { await rc.ping(); redisOk = true; } catch {}
-  res.json({ jackettUrl: ENV.jackettUrl, jackettKey: ENV.apiKey, qbitUrl: (process.env.QBIT_URL||"").replace(/\/+$/,""), qbitUser: process.env.QBIT_USER||"", stremthruUrl: ENV.stremthruUrl, stremthruKey: ENV.stremthruKey, redisUrl: ENV.redisUrl, redisOk, port: ENV.port, qbitEnabled: isQbitConfigured() });
+  res.json({ jackettUrl: ENV.jackettUrl, jackettKey: ENV.apiKey, qbitUrl: (process.env.QBIT_URL||"").replace(/\/+$/,""), qbitUser: process.env.QBIT_USER||"", redisUrl: ENV.redisUrl, redisOk, port: ENV.port, qbitEnabled: isQbitConfigured() });
 });
 app.get("/api/indexers", async (req, res) => {
   const url = (req.query.url || "").trim().replace(/\/+$/, "") || ENV.jackettUrl;
@@ -1312,56 +1284,157 @@ app.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   const prefs   = resolvePrefs(req.params.userConfig);
   const config  = prefs.debridConfig;
 
-  const lockKey  = `addlock:${provider}:${infoHash}`;
-  const isLocked = await rc.get(lockKey);
+  if (!config || (!magnet && !linkUrl)) {
+    return res.status(400).send("Configuração ou magnet/link ausente");
+  }
 
-  // Se já foi enfileirado, verifica se o RD terminou e redireciona
-  if (isLocked) {
-    if (provider.toLowerCase() === "realdebrid" && config?.rdKey) {
-      const { rdFindExistingTorrent } = require("./debrid");
-      const existing = await rdFindExistingTorrent(infoHash, config.rdKey);
-      if (existing?.links?.length) {
-        try {
-          const unresRes = await axios.post("https://api.real-debrid.com/rest/1.0/unrestrict/link",
+  const lockKey = `addlock:${provider}:${infoHash}`;
+  const alreadyAdded = await rc.get(lockKey);
+
+  // Download do .torrent se disponível
+  let torrentBuffer = null;
+  if (linkUrl?.startsWith("http")) {
+    try {
+      const dl = await axios.get(linkUrl, { 
+        responseType: "arraybuffer", 
+        timeout: 10000,
+        maxRedirects: 5,
+        validateStatus: s => s < 400,
+        headers: { "User-Agent": "Mozilla/5.0" },
+        beforeRedirect: (options, { headers }) => {
+          if (options.href?.startsWith("magnet:")) {
+            throw new Error("Redirect para magnet detectado");
+          }
+        }
+      });
+      if (dl.data && Buffer.from(dl.data)[0] === 0x64) {
+        torrentBuffer = Buffer.from(dl.data);
+      }
+    } catch(e) { 
+      if (!e.message.includes("magnet")) {
+        console.log(`[ON-DEMAND] Falha ao baixar .torrent: ${e.message}`);
+      }
+    }
+  }
+
+  const isRD = provider.toLowerCase() === "realdebrid";
+  const isTB = provider.toLowerCase() === "torbox";
+
+  // Adiciona o torrent se ainda não foi
+  if (!alreadyAdded) {
+    await rc.set(lockKey, "1", 3600); // grava antes de tentar — evita spam mesmo em falha
+    console.log(`[ON-DEMAND] Adicionando ${infoHash} ao ${provider}...`);
+    try {
+      if (isTB) {
+        const { torboxAddTorrent } = require("./debrid");
+        await torboxAddTorrent(magnet, config.torboxKey, false, torrentBuffer);
+      } else if (isRD) {
+        const { rdAddTorrent } = require("./debrid");
+        const ok = await rdAddTorrent(magnet, config.rdKey, torrentBuffer);
+        if (!ok) {
+          console.log(`[ON-DEMAND] Falha ao adicionar ao RD`);
+          return res.status(500).send(`Falha ao adicionar torrent ao Real-Debrid`);
+        }
+      }
+      console.log(`[ON-DEMAND] Adicionado com sucesso`);
+    } catch (e) {
+      console.log(`[ON-DEMAND] Erro ao adicionar: ${e.message}`);
+      if (isRD) return res.status(500).send(`Erro: ${e.message}`);
+    }
+  }
+
+  // TorBox: faz polling como RD (aguarda até 180s)
+  if (isTB) {
+    const deadline = Date.now() + 180000;
+    const pollInterval = 3000;
+    console.log(`[ON-DEMAND] TorBox: aguardando download (até 180s)...`);
+
+    while (Date.now() < deadline) {
+      try {
+        const tbRes = await axios.get("https://api.torbox.app/v1/api/torrents/mylist", {
+          headers: { Authorization: `Bearer ${config.torboxKey}` },
+          timeout: 8000
+        });
+        
+        const torrent = tbRes.data?.data?.find(t => 
+          t.hash?.toLowerCase() === infoHash.toLowerCase()
+        );
+        
+        if (torrent?.download_finished) {
+          console.log(`[ON-DEMAND] TorBox pronto! Resolvendo stream...`);
+          const { resolveDebridStream } = require("./debrid");
+          const stream = await resolveDebridStream(
+            infoHash, magnet, "", null, null, false,
+            config, null, null, torrent, null
+          );
+          
+          if (stream?.url) {
+            await rc.del(lockKey);
+            return res.redirect(302, stream.url);
+          }
+        }
+      } catch (err) {
+        console.log(`[ON-DEMAND] TorBox polling erro: ${err.message}`);
+      }
+
+      if (Date.now() + pollInterval < deadline) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } else {
+        break;
+      }
+    }
+
+    console.log(`[ON-DEMAND] TorBox timeout (180s) — ainda processando`);
+    res.setHeader("Retry-After", "10");
+    return res.status(202).send("Download em andamento no TorBox. O player tentará novamente automaticamente.");
+  }
+
+  // Polling: aguarda até 180s
+  const deadline = Date.now() + 180000;
+  const pollInterval = 3000;
+
+  console.log(`[ON-DEMAND] Aguardando processamento (até 180s)...`);
+
+  while (Date.now() < deadline) {
+    try {
+      if (isRD) {
+        const { rdFindExistingTorrent } = require("./debrid");
+        const existing = await rdFindExistingTorrent(infoHash, config.rdKey);
+        
+        if (existing?.links?.length) {
+          const unresRes = await axios.post(
+            "https://api.real-debrid.com/rest/1.0/unrestrict/link",
             `link=${encodeURIComponent(existing.links[0])}`,
-            { headers: { Authorization: `Bearer ${config.rdKey}`, "Content-Type": "application/x-www-form-urlencoded" }, timeout: 12000 });
+            { 
+              headers: { 
+                Authorization: `Bearer ${config.rdKey}`, 
+                "Content-Type": "application/x-www-form-urlencoded" 
+              }, 
+              timeout: 12000 
+            }
+          );
+          
           if (unresRes.data?.download) {
-            console.log(`  [ON-DEMAND] RD completo! Redirecionando ${infoHash}`);
+            console.log(`[ON-DEMAND] RD pronto! Redirecionando...`);
             await rc.del(lockKey);
             return res.redirect(302, unresRes.data.download);
           }
-        } catch {}
+        }
       }
+    } catch (err) {
+      console.log(`[ON-DEMAND] Erro no polling: ${err.message}`);
     }
-    console.log(`  [ON-DEMAND] Ainda baixando ${infoHash}`);
-    return res.status(202).send("Download em andamento. Tente novamente em alguns minutos.");
+
+    if (Date.now() + pollInterval < deadline) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    } else {
+      break;
+    }
   }
 
-  await rc.set(lockKey, "1", 300); // trava por 5 min
-  console.log(`\n=========================================`);
-  console.log(`[DEBRID ON-DEMAND] Enfileirando ${infoHash} no ${provider}...`);
-
-  if (config && (magnet || linkUrl)) {
-    let torrentBuffer = null;
-    if (linkUrl?.startsWith("http")) {
-      try {
-        const dl = await axios.get(linkUrl, { responseType: "arraybuffer", timeout: 10000, headers: { "User-Agent": "Mozilla/5.0" } });
-        if (dl.data && Buffer.from(dl.data)[0] === 0x64) torrentBuffer = Buffer.from(dl.data);
-      } catch(e) { console.log(`  [ON-DEMAND] Falha ao baixar .torrent: ${e.message}`); }
-    }
-    try {
-      if (provider.toLowerCase() === "torbox") {
-        const { torboxAddTorrent } = require("./debrid");
-        await torboxAddTorrent(magnet, config.torboxKey, false, torrentBuffer);
-      } else {
-        const { rdAddTorrent } = require("./debrid");
-        await rdAddTorrent(magnet, config.rdKey, torrentBuffer);
-      }
-      console.log(`[ON-DEMAND] Enfileirado com sucesso.`);
-    } catch (e) { console.log(`[ON-DEMAND] Erro: ${e.message}`); }
-  }
-  console.log(`=========================================\n`);
-  return res.status(202).send("Download enfileirado. Aguarde o download completar e clique novamente.");
+  console.log(`[ON-DEMAND] Timeout (180s) — ainda processando`);
+  res.setHeader("Retry-After", "10");
+  return res.status(202).send("Download em andamento. O player tentará novamente automaticamente.");
 });
 
 app.get("/:userConfig/qbit/:jobToken", async (req, res) => {
@@ -1372,9 +1445,6 @@ app.get("/:userConfig/qbit/:jobToken", async (req, res) => {
   const job = await loadQbitJob(req.params.jobToken);
   if (!job?.infoHash) return res.status(404).send("Job expirado ou inválido.");
 
-  const lockKey = `qbitlock:${job.infoHash}`;
-  if (!(await rc.get(lockKey))) await rc.set(lockKey, "1", 90);
-
   try {
     const playable = await getPlayableLocalFile(job.infoHash, job.fileIdx, job.fileName);
     if (!playable) {
@@ -1382,12 +1452,24 @@ app.get("/:userConfig/qbit/:jobToken", async (req, res) => {
       if (job.link && !job.link.startsWith("magnet:")) {
         try {
           const dl = await axios.get(job.link, {
-            responseType: "arraybuffer", timeout: 15000, maxRedirects: 10,
+            responseType: "arraybuffer", timeout: 15000, maxRedirects: 5,
             maxContentLength: 8 * 1024 * 1024, headers: { "User-Agent": "Mozilla/5.0" },
             validateStatus: s => s < 400,
+            beforeRedirect: (options, { headers }) => {
+              if (options.href?.startsWith("magnet:")) {
+                throw new Error("Redirect para magnet");
+              }
+            }
           });
-          if (dl.data && Buffer.from(dl.data)[0] === 0x64) torrentBuffer = Buffer.from(dl.data);
-        } catch {}
+          if (dl.data && Buffer.from(dl.data)[0] === 0x64) {
+            torrentBuffer = Buffer.from(dl.data);
+            console.log(`[qBit] .torrent baixado: ${torrentBuffer.length} bytes`);
+          }
+        } catch (e) {
+          if (!e.message.includes("magnet")) {
+            console.log(`[qBit] Falha ao baixar .torrent: ${e.message}`);
+          }
+        }
       }
       await ensureTorrentReady(job.infoHash, {
         torrentBuffer, magnet: job.magnet, fileIdx: job.fileIdx, fileName: job.fileName,
@@ -1442,8 +1524,10 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     if (type === "movie" && !enabledCats.includes("movie")) return res.json({ streams: [] });
 
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
-    const results  = await jackettSearch({ parsed, queries, search }, indexers, prefs);
+    const results = await jackettSearch({ parsed, queries, search }, indexers, prefs);
     const priorityLang = prefs.priorityLang ?? "pt-br";
+
+    console.log(`Filtros ativos: onlyDubbed=${prefs.onlyDubbed}, priorityLang=${priorityLang}, keywordBoost=${prefs.keywordBoost ? 'SIM' : 'NÃO'}`);
 
     const candidates = results
       .filter(r => r?.InfoHash || r?.MagnetUri || r?.Link)
@@ -1454,13 +1538,27 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         if (type === "series") return seriesEpisodeMatches(r.Title || "", parsed.season, parsed.episode);
         return true;
       })
-      .filter(r => !prefs.onlyDubbed || !priorityLang || getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang))
       .filter(r => {
+        // Keyword match: passa sempre (independente de onlyDubbed ou titleMatchScore)
+        if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) {
+          r._titleMatchScore = 1; r._keywordMatch = true; return true;
+        }
+        if (!prefs.onlyDubbed) return true;
+        const langs = getLangs(r.Title || "", parsed.isAnime);
+        const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+        if (!priorityLang) return true;
+        return hasLang;
+      })
+      .filter(r => {
+        if (r._keywordMatch || r._metaIdMatch) return true;
         const resultImdbId = getResultImdbId(r);
         if (requestedImdbId && resultImdbId && resultImdbId === requestedImdbId) {
           r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
           r._metaIdMatch = true; return true;
         }
+        const langs = getLangs(r.Title || "", parsed.isAnime);
+        const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+        if (hasLang) { r._titleMatchScore = 1; return true; }
         const sc = titleMatchScore(r.Title || "", [displayTitle, ...aliases]);
         const relaxedScore = relaxedTitleMatchScore(r.Title || "", [displayTitle, ...aliases]);
         const episodeRank = parsed.isAnime ? animeEpisodeMatchRank(r.Title || "", episode) : episodeMatchRank(r.Title || "", parsed.season, parsed.episode);
@@ -1471,167 +1569,108 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       })
       .filter(r => { if (type !== "movie" || !year) return true; const ry = extractReleaseYear(r.Title || ""); return !ry || Math.abs(ry - year) <= 1; })
       .map(r => {
-        // Salva o score original puro antes de sofrer boost pelo cache
-        r._originalScore = (((r._metaIdMatch ? 1 : 0) * 40000) + ((r._structuredMatch ? 1 : 0) * 20000) +
+        const t = r.Title || "";
+        const langs = getLangs(t, parsed.isAnime);
+        const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+        const isMulti = /(multi)[-.\\s]?(audio)?/i.test(t);
+        // Prioridade: lang prioritário (3) > keywordBoost (2) > multi (1)
+        const langPriority = hasLang ? 3 : (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost) ? 2 : (isMulti ? 1 : 0));
+        r._originalScore = (langPriority * 100000) +
+          ((r._metaIdMatch ? 1 : 0) * 40000) + ((r._structuredMatch ? 1 : 0) * 20000) +
           (parsed.isAnime ? animeEpisodeMatchRank(r.Title || "", episode) : episodeMatchRank(r.Title || "", parsed.season, parsed.episode)) * 10000 +
-          (r._titleMatchScore || 0) * 1000 + score(r, prefs.weights, parsed.isAnime, priorityLang));
+          (r._titleMatchScore || 0) * 1000 + score(r, prefs.weights, parsed.isAnime, priorityLang);
         return r;
       })
-      .sort((a, b) => {
-        if (!isDebridMode) return (b.Seeders || 0) - (a.Seeders || 0);
-        return b._originalScore - a._originalScore;
-      });
+      .sort((a, b) => b._originalScore - a._originalScore);
 
-    // FIX: Ampliando o leque de busca para garantir que links do final da lista sejam checados e empurrados para cima
-    const maxProcess = (prefs.maxResults || 20) * 3; 
-    const topCandidates = candidates.slice(0, maxProcess);
-
-    console.log(`Extraindo InfoHashes de ${topCandidates.length} candidatos promissores...`);
-    
-    const withHashes = [];
-    const concurrency = 10;
-    for (let i = 0; i < topCandidates.length; i += concurrency) {
-      const chunk = topCandidates.slice(i, i + concurrency);
-      const resolvedChunk = await Promise.all(
-        chunk.map(async r => {
-          const resolved = await resolveInfoHash(r);
-          if (resolved?.infoHash) return { ...r, _resolved: resolved };
-          return null;
-        })
-      );
-      withHashes.push(...resolvedChunk.filter(Boolean));
+    console.log(`Resultados: ${results.length} brutos → ${candidates.length} após filtros (idioma, título, ano)`);
+    if (prefs.keywordBoost) {
+      const withKeywords = candidates.filter(r => matchesKeywordBoost(r.Title || "", prefs.keywordBoost));
+      console.log(`Keywords: ${withKeywords.length}/${candidates.length} releases com boost`);
     }
+
+    // Aplica limite por indexer APÓS filtros (idioma/keyword já preservados)
+    let filteredCandidates = candidates;
+    if (prefs.maxResultsPerIndexer > 0) {
+      const countByIndexer = new Map();
+      filteredCandidates = candidates.filter(r => {
+        if (r._keywordMatch) return true; // keywords sempre passam
+        const key = r.TrackerId || r.Tracker || "unknown";
+        const n = (countByIndexer.get(key) || 0) + 1;
+        countByIndexer.set(key, n);
+        return n <= prefs.maxResultsPerIndexer;
+      });
+    }
+
+    const maxOut = prefs.maxResults || 20;
+    const topCandidates = filteredCandidates.slice(0, maxOut);
+    console.log(`Extraindo InfoHashes de ${topCandidates.length} candidatos...`);
+    
+    const withHashes = (await Promise.all(
+      topCandidates.map(async r => {
+        const resolved = await resolveInfoHash(r);
+        return resolved?.infoHash ? { ...r, _resolved: resolved } : null;
+      })
+    )).filter(Boolean);
 
     let rdCacheMap = {};
     let tbCacheMap = {};
 
     if (isDebridMode && withHashes.length > 0) {
       const allHashes = [...new Set(withHashes.map(r => r._resolved.infoHash))];
-      console.log(`[DEBRID] Verificando cache em lote para ${allHashes.length} hashes únicos...`);
       const { mode, torboxKey, rdKey } = prefs.debridConfig;
       const { rdBatchCheckCache, torboxBatchCheckCache } = require("./debrid");
 
-      // Hashes de torrents privados (sem MagnetUri = tracker privado).
-      // O TorBox pode adicioná-los automaticamente ao processar o checkcached.
       const privateHashes = new Set(
-        withHashes
-          .filter(r => !r.MagnetUri && r._resolved?.buffer)
-          .map(r => r._resolved.infoHash)
+        withHashes.filter(r => !r.MagnetUri && r._resolved?.buffer).map(r => r._resolved.infoHash)
       );
-      if (privateHashes.size) console.log(`[DEBRID] ${privateHashes.size} hashes privados excluídos do TB checkcached`);
-
-      // Mapa hash → buffer para torrents privados (usados no RD batch via PUT /addTorrent)
       const bufferMap = {};
       for (const r of withHashes) {
         if (r._resolved?.buffer) bufferMap[r._resolved.infoHash] = r._resolved.buffer;
       }
 
-      const cacheQ = type === "series" && parsed.season != null && parsed.episode != null
-        ? `${displayTitle} S${String(parsed.season).padStart(2,"0")}E${String(parsed.episode ?? episode).padStart(2,"0")}`
-        : displayTitle;
-
-      const [rdResult, tbResult, torznabHashes] = await Promise.all([
+      const [rdResult, tbResult] = await Promise.all([
         (mode === "realdebrid" || mode === "dual") && rdKey
-          ? rdBatchCheckCache(allHashes, rdKey, bufferMap)
-          : Promise.resolve({}),
+          ? rdBatchCheckCache(allHashes, rdKey, bufferMap) : Promise.resolve({}),
         (mode === "torbox" || mode === "dual") && torboxKey
-          ? torboxBatchCheckCache(allHashes, torboxKey, privateHashes)
-          : Promise.resolve({}),
-        searchCacheSources({ q: cacheQ, imdbId: requestedImdbId, type }, prefs),
+          ? torboxBatchCheckCache(allHashes, torboxKey, privateHashes) : Promise.resolve({}),
       ]);
-
       rdCacheMap = rdResult;
       tbCacheMap = tbResult;
 
-      const nativeCached = new Set();
-      for (const hash of allHashes) {
-        if (rdCacheMap[hash]?.rd?.length > 0) nativeCached.add(hash);
-        if (tbCacheMap[hash] && typeof tbCacheMap[hash] === "object" && tbCacheMap[hash] !== false) nativeCached.add(hash);
-      }
-
-      const stremThruCandidates = allHashes.filter(hash => !privateHashes.has(hash) && !nativeCached.has(hash));
-      const stUrl = prefs?.stremthru?.url || ENV.stremthruUrl;
-      const stremThruChecks = [
-        (mode === "realdebrid" || mode === "dual") && rdKey
-          ? checkCacheViaStremThru(stremThruCandidates, "realdebrid", rdKey, stUrl)
-          : Promise.resolve(new Set()),
-        (mode === "torbox" || mode === "dual") && torboxKey
-          ? checkCacheViaStremThru(stremThruCandidates, "torbox", torboxKey, stUrl)
-          : Promise.resolve(new Set()),
-      ];
-      const [stremThruRd, stremThruTb] = await Promise.all(stremThruChecks);
-      const stremThruCached = new Set([...stremThruRd, ...stremThruTb]);
-
       const debridCached = new Set();
-      const torznabCached = new Set();
-      const stremThruConfirmed = new Set();
-
-      // FIX: Marcar os hashes cacheados e reordenar a lista para que eles subam ao topo (Boost)
       withHashes.forEach(r => {
         r._isCached = false;
         const h = r._resolved.infoHash;
-        if ((mode === "realdebrid" || mode === "dual") && rdCacheMap[h] && rdCacheMap[h].rd?.length > 0) {
+        if ((mode === "realdebrid" || mode === "dual") && rdCacheMap[h]?.rd?.length > 0) {
           r._isCached = true; debridCached.add(h);
         }
         if ((mode === "torbox" || mode === "dual") && tbCacheMap[h] && typeof tbCacheMap[h] === 'object' && tbCacheMap[h] !== false) {
           r._isCached = true; debridCached.add(h);
         }
-        if (!r._isCached && stremThruCached.has(h)) {
-          r._isCached = true; stremThruConfirmed.add(h);
-        }
-        if (!r._isCached && torznabHashes.has(h)) {
-          r._cacheCandidate = true;
-          torznabCached.add(h);
-        }
       });
-
-      console.log(`[DEBRID] cached=${debridCached.size + stremThruConfirmed.size} (debrid=${debridCached.size} stremthru=${stremThruConfirmed.size} candidatos=${torznabCached.size}) uncached=${withHashes.filter(r => !r._isCached).length}`);
-
-      // Ordenação: cache é prioridade máxima; dentro de cada grupo, ordena por idioma → resolução → qualidade → tamanho
-      const sortMode = prefs.sortMode || "cache";
-      const langScore = (r) => {
-        const t = r.Title || "";
-        const langs = getLangs(t, parsed.isAnime);
-        if (priorityLang && langs.some(l => l.code === priorityLang)) return 3;
-        if (/(multi)[-.\\s]?(audio)?/i.test(t)) return 2;
-        if (langs.length > 0) return 1;
-        return 0;
-      };
-      const resScore  = (r) => { const res  = first(RESOLUTION, r.Title || ""); return res  ? res.score  : 0; };
-      const qualScore = (r) => { const qual = first(QUALITY,    r.Title || ""); return qual ? qual.score : 0; };
-      const sizeScore = (r) => { const gb = (r.Size || 0) / 1e9; return gb > 0 ? Math.max(0, 10 - Math.abs(gb - 10)) : 0; };
-
-      withHashes.sort((a, b) => {
-        // Cache sempre primeiro independente do sortMode
-        const ca = a._isCached ? 1 : 0, cb = b._isCached ? 1 : 0;
-        if (ca !== cb) return cb - ca;
-        // Dentro do grupo, aplica o sortMode escolhido pelo usuário
-        if (sortMode === "resolution") {
-          const dr = resScore(b) - resScore(a); if (dr !== 0) return dr;
-          const dq = qualScore(b) - qualScore(a); if (dq !== 0) return dq;
-        } else if (sortMode === "size") {
-          const ds = sizeScore(b) - sizeScore(a); if (ds !== 0) return ds;
-        } else if (sortMode === "seeders") {
-          return (b.Seeders || 0) - (a.Seeders || 0);
-        } else {
-          // "cache" — dentro do grupo: idioma → resolução → qualidade → tamanho
-          const dl = langScore(b) - langScore(a); if (dl !== 0) return dl;
-          const dr = resScore(b)  - resScore(a);  if (dr !== 0) return dr;
-          const dq = qualScore(b) - qualScore(a); if (dq !== 0) return dq;
-          return sizeScore(b) - sizeScore(a);
-        }
-        return (b._originalScore || 0) - (a._originalScore || 0);
-      });
+      console.log(`[DEBRID] cached=${debridCached.size} uncached=${withHashes.length - debridCached.size}`);
     }
 
+    // Streams sintéticos desabilitados: hashes torznab sem título não podem ser validados
+    // contra o conteúdo buscado, gerando resultados irrelevantes.
+
     // ── Resolução de streams finais ──────────────────────────────────────────
+    const streamMeta = {
+      title: displayTitle,
+      year: year,
+      formattedSeasons: (type === "series" && parsed.season != null)
+        ? `S${String(parsed.season).padStart(2, "0")}${parsed.episode != null ? `E${String(parsed.episode).padStart(2, "0")}` : ""}`
+        : ""
+    };
+
     const resolvedAll = await Promise.all(
       withHashes.map(async r => {
         try {
         const resolved = r._resolved;
         const indexerName = r.Tracker || r.TrackerId || "Unknown";
-        const { name, description: descNoSeeds, resLabel } = formatStream(r, indexerName, parsed.isAnime, prefs, false);
-        const { description } = formatStream(r, indexerName, parsed.isAnime, prefs, true);
+        const { name, description: descNoSeeds, resLabel } = formatStream(r, indexerName, parsed.isAnime, prefs, false, streamMeta);
+        const { description } = formatStream(r, indexerName, parsed.isAnime, prefs, true, streamMeta);
         const matchedFile = (type === "series" || parsed.isAnime)
           ? pickEpisodeFile(resolved.files, parsed.season, parsed.episode ?? episode, parsed.isAnime)
           : null;
@@ -1656,6 +1695,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             name: qbitName,
             description: [description, matchedFile?.name ? `📂 ${matchedFile.name}` : ""].filter(Boolean).join("\n"),
             url: `${publicBase}/${req.params.userConfig}/qbit/${jobToken}`,
+            indexer: renameIndexer(indexerName),
             _cached: !!localPlayable,
             behaviorHints: {
               filename: matchedFile?.name,
@@ -1699,6 +1739,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
                 name: streamName,
                 description: [descNoSeeds, debridFilename ? `📂 ${debridFilename}` : ""].filter(Boolean).join("\n"),
                 url: resObj.url,
+                indexer: renameIndexer(indexerName),
                 _cached: true,
                 behaviorHints: {
                   filename: debridFilename, videoSize: matchedFile?.size, bingeGroup: `prowjack|debrid|${resolved.infoHash}`, notWebReady: false,
@@ -1707,7 +1748,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             }
 
             if (resObj.queued) {
-              const provider = resObj.provider || "Debrid";
+              const provider = (resObj.provider || "Debrid").toLowerCase().replace(/[^a-z]/g, "");
               const hostUrl = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.get('host')}`;
               const linkParam = r.Link ? `&link=${encodeURIComponent(r.Link)}` : "";
               const addUrl = `${hostUrl}/${req.params.userConfig}/debrid-add/${provider}/${resolved.infoHash}?magnet=${encodeURIComponent(magnet)}${linkParam}`;
@@ -1719,6 +1760,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
                 name: streamName,
                 description: description,
                 url: addUrl,
+                indexer: renameIndexer(indexerName),
                 _cached: false,
                 behaviorHints: { notWebReady: true },
               };
@@ -1744,6 +1786,7 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           name,
           description: [description, matchedFile?.name ? `📂 ${matchedFile.name}` : ""].filter(Boolean).join("\n"),
           infoHash: resolved.infoHash, fileIdx: matchedFile?.idx, sources,
+          indexer: renameIndexer(indexerName),
           behaviorHints: {
             filename: matchedFile?.name, videoSize: matchedFile?.size,
             bingeGroup: parsed.isAnime ? `prowjack|anime|${displayTitle}` : `prowjack|${resolved.infoHash}`,
@@ -1755,22 +1798,52 @@ app.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
     const allStreams = resolvedAll.flat(2).filter(Boolean);
 
-    // Garante cached primeiro mesmo após flat() misturar streams multi (TB+RD)
-    if (isDebridMode) {
-      allStreams.sort((a, b) => (b._cached ? 1 : 0) - (a._cached ? 1 : 0));
-    }
+    // Propaga metadados de ordenação: cada resolvedAll[i] corresponde a withHashes[i]
+    resolvedAll.forEach((streamOrArr, i) => {
+      const r = withHashes[i];
+      if (!r) return;
+      const items = Array.isArray(streamOrArr) ? streamOrArr.flat() : [streamOrArr];
+      for (const s of items) {
+        if (!s) continue;
+        s._originalScore = r._originalScore || 0;
+        s._title    = r.Title || "";
+        s._seeders  = r.Seeders || 0;
+        s._sizeGb   = (r.Size || 0) / 1e9;
+      }
+    });
 
-    const maxOut = prefs.maxResults || 20;
-    let finalStreams;
-    if (isDebridMode) {
-      const cached = allStreams.filter(s => s._cached);
-      const queued = allStreams.filter(s => !s._cached);
-      finalStreams = [...cached, ...queued].slice(0, maxOut);
-    } else {
-      finalStreams = allStreams.slice(0, maxOut);
+    const dedupedStreams = allStreams;
+
+
+    // Ordenação final: Torz primeiro, depois 1°cache 2°lang 3°resolução 4°qualidade 5°seeders 6°tamanho
+    const _langScore = (s) => {
+      const t = s._title || "";
+      const langs = getLangs(t, parsed.isAnime);
+      if (priorityLang && langs.some(l => l.code === priorityLang)) return 3;
+      if (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost)) return 2;
+      if (/(multi|dual)[-.\\s]?(audio)?/i.test(t)) return 1;
+      return 0;
+    };
+    const _resScore  = (s) => { const r = first(RESOLUTION, s._title || ""); return r ? r.score  : 0; };
+    const _qualScore = (s) => { const q = first(QUALITY,    s._title || ""); return q ? q.score  : 0; };
+
+    dedupedStreams.sort((a, b) => {
+      // Depois: cache > lang > res > qual > seeders > tamanho
+      const ca = a._cached ? 1 : 0, cb = b._cached ? 1 : 0;
+      if (ca !== cb) return cb - ca;
+      const dl = _langScore(b) - _langScore(a); if (dl !== 0) return dl;
+      const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
+      const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
+      const ds = (b._seeders || 0) - (a._seeders || 0); if (ds !== 0) return ds;
+      return Math.abs((a._sizeGb || 0) - 10) - Math.abs((b._sizeGb || 0) - 10);
+    });
+
+    const finalStreams = dedupedStreams.slice(0, maxOut);
+    if (dedupedStreams.length > 0) {
+      const top = dedupedStreams.slice(0, Math.min(5, dedupedStreams.length));
+      console.log(`[ORDEM] top${top.length}: ` + top.map(s => `[cache=${s._cached?1:0} lang=${_langScore(s)} res=${_resScore(s).toFixed(1)}] ${(s._title||s.name||"").slice(0,50)}`).join(" | "));
     }
-    // Remove campo interno antes de enviar
-    finalStreams.forEach(s => delete s._cached);
+    finalStreams.forEach(s => { delete s._cached; delete s._originalScore; delete s._title; delete s._seeders; delete s._sizeGb; });
 
     if (isDebridMode) {
       const cached = finalStreams.filter(s => s.url && !s.url.includes('/debrid-add/')).length;
