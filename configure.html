@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ProwJack PRO — Configurar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --bg:#0a0e17;--sur:#12161f;--bord:#1e2433;--bord2:#2a3040;
+  --accent:#7c9aff;--accent-dim:#3a4a7a;--accent-glow:rgba(124,154,255,.18);
+  --green:#4ae89e;--red:#ff6b6b;--text:#e4e8f5;--dim:#5a6488;--muted:#1a1f2e;
+  --tb:#ff9d5c;--tb-dim:#8a4a1e;--tb-bg:rgba(255,157,92,.09);
+  --rd:#c88aff;--rd-dim:#6a3ea9;--rd-bg:rgba(200,138,255,.09);
+  --dual:#4ae89e;--dual-bg:rgba(74,232,158,.08);
+  --amber:#f5a623;--adim:#5a3a10;
+  --mono:'Space Mono',monospace;--sans:'Barlow Condensed',sans-serif;
+  --radius:8px;--shadow:0 4px 20px rgba(0,0,0,.3);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:linear-gradient(135deg,#0a0e17 0%,#0d1220 100%);color:var(--text);font-family:var(--mono);font-size:13px;min-height:100vh;display:flex;flex-direction:column;align-items:center;position:relative}
+body::before{content:'';position:fixed;top:0;left:0;right:0;height:300px;background:radial-gradient(ellipse at top,rgba(124,154,255,.08),transparent);pointer-events:none;z-index:0}
+
+header{width:100%;max-width:900px;display:flex;align-items:center;justify-content:space-between;padding:24px 28px;border-bottom:1px solid var(--bord);backdrop-filter:blur(10px);background:rgba(18,22,31,.6);position:relative;z-index:1;margin-bottom:8px}
+.logo-wrap{display:flex;flex-direction:column;gap:4px}
+.logo-name{font-family:var(--sans);font-weight:900;font-size:24px;letter-spacing:4px;color:#fff;text-transform:uppercase;text-shadow:0 0 20px rgba(124,154,255,.4)}
+.logo-v{font-size:9px;color:var(--accent);background:var(--accent-glow);border:1px solid var(--accent-dim);padding:3px 8px;border-radius:4px;margin-left:10px;vertical-align:middle;font-weight:700;box-shadow:0 0 10px var(--accent-glow)}
+.logo-sub{font-family:var(--sans);font-size:11px;font-weight:300;color:var(--dim);letter-spacing:3px;text-transform:uppercase;opacity:.8}
+.status-row{display:flex;align-items:center;gap:14px;font-size:11px;color:var(--dim);background:var(--muted);padding:8px 14px;border-radius:var(--radius);border:1px solid var(--bord)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:6px;flex-shrink:0;transition:.3s}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green),0 0 3px var(--green) inset}
+.dot.err{background:var(--red);box-shadow:0 0 8px var(--red),0 0 3px var(--red) inset}
+.dot.wait{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.4s ease-in-out infinite}
+
+nav.tabs{width:100%;max-width:900px;display:flex;padding:0 28px;border-bottom:1px solid var(--bord);position:relative;z-index:1;background:rgba(18,22,31,.4);backdrop-filter:blur(8px)}
+.tab{padding:14px 20px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-1px;transition:all .3s ease;position:relative}
+.tab::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%) scaleX(0);width:80%;height:3px;background:linear-gradient(90deg,transparent,var(--accent),transparent);border-radius:2px 2px 0 0;transition:transform .3s ease;opacity:0}
+.tab:hover{color:var(--text);transform:translateY(-2px)}
+.tab.active{color:var(--accent)}
+.tab.active::before{transform:translateX(-50%) scaleX(1);opacity:1}
+
+.hero{width:100%;max-width:900px;padding:22px 28px 8px;position:relative;z-index:1}
+.hero-shell{display:grid;grid-template-columns:1.4fr .9fr;gap:16px;align-items:stretch}
+.hero-main,.hero-side{background:linear-gradient(180deg,rgba(124,154,255,.08),rgba(18,22,31,.92));border:1px solid var(--bord);border-radius:14px;padding:18px 18px 16px;box-shadow:var(--shadow)}
+.hero-main{position:relative;overflow:hidden}
+.hero-main::after{content:'';position:absolute;top:-30px;right:-20px;width:140px;height:140px;background:radial-gradient(circle,rgba(124,154,255,.18),transparent 70%);pointer-events:none}
+.hero-kicker{font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.hero-title{font-family:var(--sans);font-weight:900;font-size:28px;line-height:1;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}
+.hero-copy{font-size:12px;line-height:1.8;color:#c7d0ea;max-width:58ch}
+.hero-pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.hero-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid var(--bord2);background:rgba(10,14,23,.7);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+.hero-side{display:flex;flex-direction:column;justify-content:space-between;gap:12px;background:linear-gradient(180deg,rgba(74,232,158,.06),rgba(18,22,31,.94))}
+.hero-side-title{font-family:var(--sans);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--green)}
+.hero-list{display:grid;gap:8px}
+.hero-list div{font-size:11px;line-height:1.7;color:#d7def4;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.06);background:rgba(10,14,23,.55)}
+
+.debrid-ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 16px}
+.ref-card{border:1px solid var(--bord2);border-radius:12px;padding:14px;background:linear-gradient(180deg,rgba(10,14,23,.9),rgba(18,22,31,.95));box-shadow:var(--shadow)}
+.ref-card.tb{border-color:rgba(255,157,92,.28);box-shadow:0 0 0 1px rgba(255,157,92,.08), var(--shadow)}
+.ref-card.rd{border-color:rgba(200,138,255,.28);box-shadow:0 0 0 1px rgba(200,138,255,.08), var(--shadow)}
+.ref-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.ref-title{font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.ref-card.tb .ref-title{color:var(--tb)}
+.ref-card.rd .ref-title{color:var(--rd)}
+.ref-copy{font-size:11px;line-height:1.7;color:#cbd5f2;min-height:56px}
+.btn-ref{justify-content:center;width:100%;margin-top:10px;padding:10px 14px;border-radius:10px}
+.rd-banner{display:flex;justify-content:center;align-items:center;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:10px;margin-top:10px}
+.rd-banner img{max-width:100%;height:auto;display:block;border-radius:6px}
+
+@media(max-width:760px){.hero-shell,.debrid-ref-grid{grid-template-columns:1fr}}
+
+.pane{display:none;padding:28px 24px;width:100%;max-width:900px}
+.pane.active{display:block}
+
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g2 .full{grid-column:1/-1}
+@media(max-width:680px){.g2{grid-template-columns:1fr}}
+
+.card{background:var(--sur);border:1px solid var(--bord);border-radius:var(--radius);padding:20px}
+.ctitle{font-family:var(--sans);font-weight:700;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.ctitle::before{content:'';width:3px;height:12px;background:var(--accent);border-radius:2px;display:inline-block}
+
+.env-box{background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px;font-size:11px;line-height:2.2}
+.env-row{display:flex;gap:12px;align-items:center}
+.env-key{color:var(--dim);min-width:80px;letter-spacing:1px;text-transform:uppercase;font-size:10px}
+.env-val{color:var(--green)}
+.env-val.err{color:var(--red)}
+
+label{display:block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+input[type=text],input[type=number],input[type=password],select.ix-select{width:100%;background:var(--bg);border:1px solid var(--bord2);color:var(--text);padding:9px 12px;font-family:var(--mono);font-size:12px;border-radius:var(--radius);outline:none;margin-bottom:14px;transition:.15s}
+input:focus,select.ix-select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow)}
+
+.w-row{display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:10px;margin-bottom:10px}
+.w-row2{display:grid;grid-template-columns:130px 1fr;align-items:center;gap:10px;margin-bottom:10px}
+.w-label{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+.w-val{font-family:var(--mono);font-size:13px;color:var(--accent);text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:2px;background:var(--bord2);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;background:var(--accent);border-radius:50%;cursor:pointer;transition:.15s}
+input[type=range]::-webkit-slider-thumb:hover{background:#fff;box-shadow:0 0 8px var(--accent)}
+
+.ix-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.ix-search{flex:1;min-width:160px;max-width:260px;margin:0!important;padding:7px 10px!important}
+.ix-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;max-height:340px;overflow-y:auto}
+.ix-grid::-webkit-scrollbar{width:3px}
+.ix-grid::-webkit-scrollbar-thumb{background:var(--bord2);border-radius:2px}
+.ix-item{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--bord);border-radius:var(--radius);padding:8px 10px;cursor:pointer;transition:.15s;user-select:none}
+.ix-item:hover{border-color:var(--bord2)}
+.ix-item.on{border-color:var(--accent-dim);background:var(--accent-glow)}
+.ix-item input[type=checkbox]{accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.ix-item span{font-size:11px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ix-item .ix-name{flex:1;min-width:0}
+.ix-item .ix-flags{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.ix-flag{display:inline-flex;align-items:center;padding:2px 6px;border-radius:999px;border:1px solid var(--bord2);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim);background:rgba(255,255,255,.03)}
+.ix-flag.shared{border-color:var(--accent-dim);color:var(--accent);background:var(--accent-glow)}
+.ix-flag.private{border-color:rgba(255,157,92,.28);color:var(--tb);background:rgba(255,157,92,.08)}
+.ix-empty{padding:40px;text-align:center;color:var(--dim);font-size:12px}
+
+.tg-group{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tg{padding:6px 14px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--bord2);background:transparent;color:var(--dim);border-radius:var(--radius);cursor:pointer;transition:.15s}
+.tg:hover{border-color:var(--accent-dim);color:var(--text)}
+.tg.on{border-color:var(--accent);background:var(--accent-glow);color:var(--accent)}
+
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;border:none;border-radius:var(--radius);cursor:pointer;transition:.15s;text-decoration:none}
+.btn-p{background:var(--accent);color:#fff}
+.btn-p:hover{background:#8aa4ff;box-shadow:0 0 16px var(--accent-glow)}
+.btn-s{background:transparent;border:1px solid var(--bord2);color:var(--dim)}
+.btn-s:hover{border-color:var(--accent-dim);color:var(--text)}
+.btn-d{background:transparent;border:1px solid rgba(240,96,96,.3);color:var(--red);font-size:10px;padding:3px 9px}
+.btn-d:hover{border-color:var(--red);background:rgba(240,96,96,.1)}
+.btn-sm{padding:5px 12px;font-size:10px}
+.btn-tb{background:var(--tb-bg);border:1px solid var(--tb-dim);color:var(--tb);font-size:10px;padding:5px 12px;letter-spacing:1px}
+.btn-tb:hover{background:rgba(255,140,66,.15);border-color:var(--tb);color:#fff}
+.btn-rd{background:var(--rd-bg);border:1px solid var(--rd-dim);color:var(--rd);font-size:10px;padding:5px 12px;letter-spacing:1px}
+.btn-rd:hover{background:rgba(176,122,255,.18);border-color:var(--rd);color:#fff}
+
+.ibox{margin-top:20px;background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);overflow:hidden}
+.ibox-head{background:var(--accent-glow);border-bottom:1px solid var(--bord2);padding:9px 14px;font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent)}
+.ibox-url{padding:14px;font-family:var(--mono);font-size:11px;color:var(--green);word-break:break-all;line-height:1.9}
+.ibox-url.empty{color:var(--dim);font-style:italic}
+.ibox-foot{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--bord)}
+
+.anime-info{background:var(--accent-glow);border:1px solid var(--accent-dim);border-radius:var(--radius);padding:10px 14px;margin-top:10px;font-size:11px;color:var(--accent);line-height:1.8}
+
+.lang-box{background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);padding:14px;margin-top:14px}
+.lang-box-title{font-family:var(--sans);font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.lang-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-bottom:10px}
+.lang-btn{display:flex;align-items:center;gap:7px;padding:8px 10px;background:var(--sur);border:1px solid var(--bord);border-radius:var(--radius);cursor:pointer;transition:.15s;font-family:var(--mono);font-size:11px;color:var(--dim);user-select:none}
+.lang-btn:hover{border-color:var(--bord2);color:var(--text)}
+.lang-btn.selected{border-color:var(--accent);background:var(--accent-glow);color:var(--accent)}
+.lang-btn .flag{font-size:14px;flex-shrink:0}
+.lang-info{font-size:10px;color:var(--dim);line-height:1.7;margin-top:8px}
+.lang-info strong{color:var(--text)}
+
+.debrid-mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+@media(max-width:540px){.debrid-mode-grid{grid-template-columns:1fr}}
+.debrid-mode-btn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:14px 8px;background:var(--bg);border:1px solid var(--bord2);border-radius:var(--radius);cursor:pointer;transition:.2s;user-select:none}
+.debrid-mode-btn:hover{border-color:var(--bord2);background:var(--muted)}
+.debrid-mode-btn.active-tb{border-color:var(--tb);background:var(--tb-bg);box-shadow:0 0 12px rgba(255,140,66,.12)}
+.debrid-mode-btn.active-rd{border-color:var(--rd);background:var(--rd-bg);box-shadow:0 0 12px rgba(176,122,255,.12)}
+.debrid-mode-btn.active-dual{border-color:var(--dual);background:var(--dual-bg);box-shadow:0 0 12px rgba(61,214,140,.1)}
+.debrid-mode-btn .dm-icon{font-size:20px;line-height:1}
+.debrid-mode-btn .dm-label{font-family:var(--sans);font-weight:700;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--dim)}
+.debrid-mode-btn.active-tb .dm-label{color:var(--tb)}
+.debrid-mode-btn.active-rd .dm-label{color:var(--rd)}
+.debrid-mode-btn.active-dual .dm-label{color:var(--dual)}
+.debrid-mode-btn .dm-desc{font-size:10px;color:var(--dim);text-align:center;line-height:1.5}
+
+.debrid-section{background:var(--bg);border:1px solid var(--bord);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+.debrid-section.tb-section{border-color:rgba(255,140,66,.2)}
+.debrid-section.rd-section{border-color:rgba(176,122,255,.2)}
+.debrid-section-title{font-family:var(--sans);font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.debrid-section-title.tb-title{color:var(--tb)}
+.debrid-section-title.rd-title{color:var(--rd)}
+.debrid-status{font-size:11px;color:var(--dim);transition:.3s;margin-left:8px}
+.debrid-status.ok{color:var(--green)}
+.debrid-status.err{color:var(--red)}
+.debrid-status.wait{color:var(--accent)}
+
+.debrid-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:3px;font-family:var(--sans);font-weight:700;font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-left:6px}
+.debrid-badge.badge-tb{background:var(--tb-bg);border:1px solid var(--tb-dim);color:var(--tb)}
+.debrid-badge.badge-rd{background:var(--rd-bg);border:1px solid var(--rd-dim);color:var(--rd)}
+.debrid-badge.badge-dual{background:var(--dual-bg);border:1px solid rgba(61,214,140,.3);color:var(--dual)}
+
+#toast{position:fixed;bottom:20px;right:20px;background:var(--sur);border:1px solid var(--bord2);border-left:3px solid var(--accent);color:var(--text);padding:10px 18px;border-radius:var(--radius);font-size:12px;transform:translateY(70px);opacity:0;transition:.3s;z-index:9998;max-width:320px}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.err{border-left-color:var(--red)}
+#toast.ok{border-left-color:var(--green)}
+
+hr{border:none;border-top:1px solid var(--bord);margin:16px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.info{font-size:11px;color:var(--dim);line-height:1.7}
+.mt8{margin-top:8px}.mt14{margin-top:14px}.mt20{margin-top:20px}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.loading{animation:pulse 1.4s ease-in-out infinite}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-wrap">
+    <div>
+      <span class="logo-name">ProwJack<span class="logo-v">v3.9</span></span>
+    </div>
+    <span class="logo-sub">Jackett · Prowlarr · Stremio</span>
+  </div>
+  <div class="status-row">
+    <span><span class="dot wait" id="d-jackett"></span><span id="l-jackett">Jackett / Prowlarr</span></span>
+    <span><span class="dot wait" id="d-redis"></span><span id="l-redis">Redis</span></span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="setup">Setup</button>
+  <button class="tab" data-tab="ranking">Ranking</button>
+</nav>
+
+<section class="hero">
+  <div class="hero-shell">
+    <div class="hero-main">
+      <div class="hero-kicker">Stack Curada</div>
+      <div class="hero-title">RSS Preferido, Debrid Direto, P2P Sob Controle</div>
+      <div class="hero-copy">Monte um addon com indexadores escolhidos por voce, fast-path de RSS para os feeds preferidos e saídas separadas por fonte para decidir com clareza entre debrid, HTTP local e P2P.</div>
+      <div class="hero-pills">
+        <span class="hero-pill">RSS Preferido</span>
+        <span class="hero-pill">TorBox / Real-Debrid</span>
+        <span class="hero-pill">qBittorrent HTTP</span>
+        <span class="hero-pill">StremThru</span>
+      </div>
+    </div>
+    <div class="hero-side">
+      <div class="hero-side-title">Boas praticas desta build</div>
+      <div class="hero-list">
+        <div>Use poucos indexadores confiaveis para um RSS mais limpo e previsivel.</div>
+        <div>Deixe idioma como prioridade quando quiser mais variedade sem esconder releases validos.</div>
+        <div>Use qBit em privado para trackers fechados e mantenha o P2P nativo como fallback.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ SETUP ══════════════════════════════════════════════════════ -->
+<div class="pane active" id="pane-setup">
+<div class="g2">
+
+  <div class="card full">
+    <div class="ctitle">Conexão Jackett / Prowlarr</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:end">
+      <div>
+        <label>URL</label>
+        <input type="text" id="jackettUrl" placeholder="ex: http://prowlarr:9696" style="margin-bottom:0" />
+      </div>
+      <div>
+        <label>API Key</label>
+        <input type="text" id="jackettKey" placeholder="API Key do Jackett/Prowlarr" style="margin-bottom:0" />
+      </div>
+      <div>
+        <label>Token de Acesso</label>
+        <input type="text" id="accessToken" placeholder="Deixe vazio para acesso livre" style="margin-bottom:0" title="Deve bater com ACCESS_TOKEN no .env do servidor" />
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn btn-p btn-sm" onclick="loadIndexers()">Conectar e Carregar Indexers</button>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div class="ctitle">Filtros &amp; Limites</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <label>Categorias</label>
+        <div class="tg-group">
+          <button class="tg on" data-cat="movie">🎬 Filmes</button>
+          <button class="tg on" data-cat="series">📺 Séries</button>
+          <button class="tg" data-cat="anime">🎌 Anime</button>
+        </div>
+        <div class="anime-info" id="anime-hint" style="display:none">
+          Anime usa indexers especializados (Nyaa, AnimeTosho) e busca por episódio.
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="tg on" id="skipBadBtn">Skip CAM/TS</button>
+          <button class="tg on" id="onlyLangBtn">Apenas idioma</button>
+          <button class="tg on" id="dedupeBtn">Deduplicar</button>
+        </div>
+      </div>
+      <div>
+        <label>⭐ Boost por Keywords (Regex)</label>
+        <input type="text" id="keywordBoost" placeholder="ex: (brremux|freddiegellar|dual-bioma)" style="font-size:11px" />
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div>
+            <label>Máx Resultados</label>
+            <input type="number" id="maxResults" value="20" min="5" max="100" style="margin-bottom:0" />
+          </div>
+          <div>
+            <label>Timeout (ms)</label>
+            <input type="number" id="slowThreshold" value="8000" min="1000" max="30000" style="margin-bottom:0" />
+          </div>
+          <div>
+            <label>Máx/Indexer</label>
+            <input type="number" id="maxResultsPerIndexer" value="0" min="0" max="200" style="margin-bottom:0" title="0 = sem limite" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div class="ctitle">Idioma Prioritário</div>
+    <div class="lang-box">
+      <div class="lang-box-title">Selecionar idioma prioritário</div>
+      <div class="lang-grid">
+        <div class="lang-btn" data-lang="pt-br" onclick="selectLang(this)"><span class="flag">🇧🇷</span> PT-BR</div>
+        <div class="lang-btn" data-lang="en"    onclick="selectLang(this)"><span class="flag">🇺🇸</span> English</div>
+        <div class="lang-btn" data-lang="es"    onclick="selectLang(this)"><span class="flag">🇪🇸</span> Español</div>
+        <div class="lang-btn" data-lang="fr"    onclick="selectLang(this)"><span class="flag">🇫🇷</span> Français</div>
+        <div class="lang-btn" data-lang=""      onclick="selectLang(this)"><span class="flag">🌐</span> Sem pref.</div>
+      </div>
+      <div class="lang-info" id="lang-desc"></div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <div class="ctitle">Indexers</div>
+    <div class="ix-toolbar">
+      <button class="btn btn-s btn-sm on" id="allBtn" onclick="setAllIndexers(true)">Todos</button>
+      <button class="btn btn-s btn-sm" onclick="setAllIndexers(false)">Nenhum</button>
+      <input class="ix-search" id="ix-search" type="text" placeholder="Filtrar indexers…" oninput="filterIx(this.value)" />
+      <span class="info" id="ix-count">Carregando indexers…</span>
+    </div>
+    <div class="ix-grid" id="ix-grid">
+      <div class="ix-empty loading">⏳ Carregando indexers do Jackett…</div>
+    </div>
+  </div>
+
+  <!-- ══ DEBRID NATIVO ════════════════════════════════════════════ -->
+  <div class="card full">
+    <div class="ctitle">⚡ Debrid</div>
+
+    <div class="debrid-ref-grid">
+      <div class="ref-card tb">
+        <div class="ref-head">
+          <div class="ref-title">TorBox</div>
+          <span class="debrid-badge badge-tb">Recomendado</span>
+        </div>
+        <div class="ref-copy">Debrid com fila transparente, cache check rapido e integracao direta no fluxo nativo do addon.<br><br>✅ <strong>Cupom SIGMA30</strong>: bonus aplicado automaticamente<br>✅ Funciona em qualquer plano pago<br>➡️ <strong>12 meses = 1 ano + 84 dias</strong></div>
+        <a class="btn btn-tb btn-ref" href="https://torbox.app/subscription?referral=b08bcd10-8df2-44c9-a0ba-4d5bdb62ef96" target="_blank" rel="noreferrer">Abrir assinatura TorBox</a>
+      </div>
+      <div class="ref-card rd">
+        <div class="ref-head">
+          <div class="ref-title">Real-Debrid</div>
+          <span class="debrid-badge badge-rd">Classico</span>
+        </div>
+        <div class="ref-copy">Bom fallback para disponibilidade ampla e modo dual junto com TorBox quando voce quiser comparar fontes.</div>
+        <a class="btn btn-rd btn-ref" href="http://real-debrid.com/?id=6684575" target="_blank" rel="noreferrer">Abrir Real-Debrid</a>
+        <a class="rd-banner" href="http://real-debrid.com/?id=6684575" target="_blank" rel="noreferrer" aria-label="Abrir banner Real-Debrid">
+          <img src="https://real-debrid.com/static/images/banner/pt.png" alt="Real-Debrid" />
+        </a>
+      </div>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);font-size:12px;margin-bottom:12px;">
+      <input type="checkbox" id="useNativeDebrid" style="width:16px;height:16px;accent-color:var(--amber);" onchange="toggleDebridMode()">
+      Ativar Debrid Nativo (TorBox/Real-Debrid direto)
+    </label>
+
+    <div id="nativeDebridConfig" style="display:none;background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+      <div class="w-row2">
+        <div class="w-label">TorBox API Key</div>
+        <input type="password" id="tbKey" placeholder="Opcional" style="margin-bottom:0;">
+      </div>
+      <div class="w-row2" style="margin-bottom:4px;">
+        <div class="w-label">Real-Debrid API Key</div>
+        <input type="password" id="rdKey" placeholder="Opcional" style="margin-bottom:0;">
+      </div>
+      <p class="info" style="font-size:10px;padding-left:140px;">Configure ao menos uma das chaves acima.</p>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);font-size:12px;margin-bottom:12px;">
+      <input type="checkbox" id="useStremThru" style="width:16px;height:16px;accent-color:var(--amber);" onchange="toggleDebridMode()">
+      Ativar Proxy Debrid via StremThru
+    </label>
+
+    <div id="stremThruConfig" style="display:none;background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:var(--radius);padding:14px;margin-bottom:14px;">
+      <div class="w-row2">
+        <div class="w-label">StremThru URL</div>
+        <input type="text" id="stUrl" placeholder="ex: https://stremthru.13377001.xyz" value="https://stremthru.13377001.xyz" style="margin-bottom:0;">
+      </div>
+
+      <hr style="border-top:1px solid var(--bord2);margin:12px 0;">
+
+      <div class="w-row2">
+        <div class="w-label">Serviço 1</div>
+        <select id="stStore1" class="ix-select" style="margin-bottom:0;">
+          <option value="torbox">TorBox</option>
+          <option value="realdebrid">Real-Debrid</option>
+          <option value="alldebrid">AllDebrid</option>
+          <option value="premiumize">Premiumize</option>
+          <option value="debridlink">Debrid-Link</option>
+          <option value="offcloud">Offcloud</option>
+        </select>
+      </div>
+      <div class="w-row2">
+        <div class="w-label">API Token 1</div>
+        <input type="text" id="stToken1" placeholder="[OBRIGATÓRIO]" style="margin-bottom:0;">
+      </div>
+
+      <hr style="border-top:1px solid var(--bord2);margin:12px 0;">
+
+      <div class="w-row2">
+        <div class="w-label" style="color:var(--dim)">Serviço 2</div>
+        <select id="stStore2" class="ix-select" style="margin-bottom:0;">
+          <option value="">-- Nenhum --</option>
+          <option value="torbox">TorBox</option>
+          <option value="realdebrid">Real-Debrid</option>
+          <option value="alldebrid">AllDebrid</option>
+          <option value="premiumize">Premiumize</option>
+          <option value="debridlink">Debrid-Link</option>
+          <option value="offcloud">Offcloud</option>
+        </select>
+      </div>
+      <div class="w-row2" style="margin-bottom:0;">
+        <div class="w-label" style="color:var(--dim)">API Token 2</div>
+        <input type="text" id="stToken2" placeholder="[OPCIONAL]" style="margin-bottom:0;">
+      </div>
+    </div>
+
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);font-size:12px;margin-bottom:8px;">
+      <input type="checkbox" id="enableP2P" checked style="width:16px;height:16px;accent-color:var(--amber);" onchange="toggleQbitMode()">
+      Habilitar P2P (qBittorrent + Magnet Links)
+    </label>
+    
+    <p class="info" style="font-size:10px;margin-left:24px;margin-bottom:10px;line-height:1.6;color:var(--dim);">
+      ℹ️ <strong>Importante:</strong> P2P deve estar ativo para usar StremThru ou magnet links nativos no Stremio.
+    </p>
+    
+    <div id="qbitModeConfig" style="display:none;margin-left:24px;margin-bottom:14px;background:rgba(245,166,35,.05);border:1px solid var(--adim);border-radius:var(--radius);padding:10px 14px;">
+      <label style="font-size:11px;color:var(--dim);margin-bottom:6px;display:block;">Modo qBittorrent:</label>
+      <select id="qbitMode" style="width:100%;background:var(--bg);border:1px solid var(--bord2);color:var(--text);padding:6px 10px;font-family:var(--mono);font-size:11px;border-radius:var(--radius);outline:none;">
+        <option value="private">🔒 Apenas Trackers Privados (Recomendado)</option>
+        <option value="always">🌐 Sempre Disponível</option>
+      </select>
+      <p class="info" style="font-size:10px;margin-top:6px;line-height:1.6;">
+        <strong>Privado:</strong> qBit só aparece para torrents sem magnet link (trackers privados).<br>
+        <strong>Sempre:</strong> qBit disponível para todos os torrents.
+      </p>
+    </div>
+  </div>
+
+    </div>
+  </div>
+  <!-- ══ FIM DEBRID NATIVO ════════════════════════════════════════ -->
+
+
+
+  <div class="card full">
+    <div class="ctitle">URL de Instalação</div>
+    <div class="row mt14">
+      <button class="btn btn-p" onclick="generate()">⚡ Gerar URL</button>
+      <button class="btn btn-s" onclick="openManifestTest()">🧪 Testar Manifest</button>
+      <button class="btn btn-s" onclick="copyUrl()">📋 Copiar</button>
+    </div>
+    <div class="ibox mt20">
+      <div class="ibox-head">🔗 Manifest URL</div>
+      <div class="ibox-url empty" id="ibox-url">— clique em Gerar URL —</div>
+      <div class="ibox-foot">
+        <a id="stremio-a" href="#" class="btn btn-p" style="pointer-events:none;opacity:.4">▶ Instalar no Stremio</a>
+        <button class="btn btn-s" onclick="copyUrl()">📋 Copiar</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ══ RANKING ════════════════════════════════════════════════════ -->
+<div class="pane" id="pane-ranking">
+<div style="max-width:520px">
+  <div class="card">
+    <div class="ctitle">Pesos do Score</div>
+    <div class="w-row">
+      <div class="w-label">🌐 Idioma</div>
+      <input type="range" id="w-lang" min="0" max="100" value="40" oninput="sv(this,'wv-lang');preview()" />
+      <div class="w-val" id="wv-lang">40</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🎥 Resolução</div>
+      <input type="range" id="w-res" min="0" max="100" value="30" oninput="sv(this,'wv-res');preview()" />
+      <div class="w-val" id="wv-res">30</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🌱 Seeders</div>
+      <input type="range" id="w-seed" min="0" max="100" value="20" oninput="sv(this,'wv-seed');preview()" />
+      <div class="w-val" id="wv-seed">20</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">📦 Tamanho</div>
+      <input type="range" id="w-size" min="0" max="100" value="5" oninput="sv(this,'wv-size');preview()" />
+      <div class="w-val" id="wv-size">5</div>
+    </div>
+    <div class="w-row">
+      <div class="w-label">🎞️ Codec</div>
+      <input type="range" id="w-codec" min="0" max="100" value="5" oninput="sv(this,'wv-codec');preview()" />
+      <div class="w-val" id="wv-codec">5</div>
+    </div>
+    <hr />
+    <div class="ctitle" style="margin-top:4px">Preview de Score</div>
+    <pre id="preview-box" style="background:#060709;border:1px solid var(--bord);border-radius:3px;padding:12px;font-size:11px;line-height:1.9;overflow-x:auto;color:var(--green)"></pre>
+  </div>
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Estado global ─────────────────────────────────────────────────
+const state = {
+  allIndexers: [],
+  selectedIndexers: [],
+  useAll: true,
+  priorityLang: 'pt-br',
+  debridMode: 'dual',
+  loadedPrefs: null,
+};
+
+function decodeBaseURL(str) {
+  try {
+    if (!str || typeof str !== 'string') return null;
+    const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(escape(atob(b64)));
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getPrefsFromLocation() {
+  const parts = location.pathname.split('/').filter(Boolean);
+  if (parts.length >= 2 && parts[1] === 'configure') return decodeBaseURL(parts[0]);
+  const qp = new URLSearchParams(location.search).get('config');
+  return decodeBaseURL(qp);
+}
+
+function applyPrefsToForm(prefs) {
+  if (!prefs) return;
+  state.loadedPrefs = prefs;
+
+  if (prefs.jackett?.url) document.getElementById('jackettUrl').value = prefs.jackett.url;
+  if (prefs.jackett?.key) document.getElementById('jackettKey').value = prefs.jackett.key;
+  if (prefs.token) document.getElementById('accessToken').value = prefs.token;
+
+  const cats = Array.isArray(prefs.categories) && prefs.categories.length ? prefs.categories : ['movie', 'series'];
+  document.querySelectorAll('.tg[data-cat]').forEach(btn => {
+    btn.classList.toggle('on', cats.includes(btn.dataset.cat));
+  });
+  document.getElementById('anime-hint').style.display = cats.includes('anime') ? 'block' : 'none';
+
+  document.getElementById('skipBadBtn').classList.toggle('on', prefs.skipBadReleases !== false);
+  document.getElementById('onlyLangBtn').classList.toggle('on', !!prefs.onlyDubbed);
+  document.getElementById('dedupeBtn').classList.toggle('on', prefs.dedupe !== false);
+  document.getElementById('keywordBoost').value = prefs.keywordBoost || '';
+  document.getElementById('maxResults').value = prefs.maxResults || 20;
+  document.getElementById('slowThreshold').value = prefs.slowThreshold || 8000;
+  document.getElementById('maxResultsPerIndexer').value = prefs.maxResultsPerIndexer || 0;
+
+  const weights = prefs.weights || {};
+  const weightMap = [
+    ['w-lang', 'wv-lang', weights.language ?? 40],
+    ['w-res', 'wv-res', weights.resolution ?? 30],
+    ['w-seed', 'wv-seed', weights.seeders ?? 20],
+    ['w-size', 'wv-size', weights.size ?? 5],
+    ['w-codec', 'wv-codec', weights.codec ?? 5],
+  ];
+  weightMap.forEach(([inputId, valueId, value]) => {
+    document.getElementById(inputId).value = value;
+    document.getElementById(valueId).textContent = value;
+  });
+
+  const langBtn = document.querySelector(`.lang-btn[data-lang="${CSS.escape(prefs.priorityLang ?? 'pt-br')}"]`) || document.querySelector('.lang-btn[data-lang="pt-br"]');
+  if (langBtn) selectLang(langBtn);
+
+  document.getElementById('enableP2P').checked = prefs.enableP2P !== false;
+  document.getElementById('qbitMode').value = prefs.qbitMode || 'private';
+  toggleQbitMode();
+
+  if (prefs.debridConfig) {
+    document.getElementById('useNativeDebrid').checked = true;
+    document.getElementById('tbKey').value = prefs.debridConfig.torboxKey || '';
+    document.getElementById('rdKey').value = prefs.debridConfig.rdKey || '';
+  }
+  if (prefs.stConfig) {
+    document.getElementById('useStremThru').checked = true;
+    document.getElementById('stUrl').value = prefs.stConfig.url || 'https://stremthru.13377001.xyz';
+    const stores = Array.isArray(prefs.stConfig.stores) ? prefs.stConfig.stores : [];
+    if (stores[0]) {
+      document.getElementById('stStore1').value = stores[0].c || 'torbox';
+      document.getElementById('stToken1').value = stores[0].t || '';
+    }
+    if (stores[1]) {
+      document.getElementById('stStore2').value = stores[1].c || '';
+      document.getElementById('stToken2').value = stores[1].t || '';
+    }
+  }
+  toggleDebridMode();
+}
+
+// ── Idioma Prioritário ────────────────────────────────────────────
+const LANG_DESCS = {
+  '':     '🌐 <strong>Sem preferência</strong> — resultados ordenados puramente por qualidade, resolução e seeders. Todos os idiomas aparecem de forma igual.',
+  'pt-br':'🇧🇷 <strong>PT-BR selecionado</strong> — resultados dublados/PT-BR aparecem no topo. Demais idiomas continuam visíveis abaixo, ordenados por qualidade e seeders.',
+  'en':   '🇺🇸 <strong>Inglês selecionado</strong> — resultados em inglês aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+  'es':   '🇪🇸 <strong>Espanhol selecionado</strong> — resultados em espanhol aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+  'fr':   '🇫🇷 <strong>Francês selecionado</strong> — resultados em francês aparecem no topo. Demais idiomas continuam visíveis abaixo.',
+};
+
+function selectLang(el) {
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  state.priorityLang = el.dataset.lang;
+  document.getElementById('lang-desc').innerHTML = LANG_DESCS[state.priorityLang] || '';
+  preview();
+}
+
+// ── Debrid Nativo ─────────────────────────────────────────────────
+function toggleNativeDebrid(on) {
+  document.getElementById('nativeDebridConfig').style.display = on ? 'block' : 'none';
+  const badge = document.getElementById('native-debrid-badge');
+  if (on) {
+    updateDebridBadge();
+    badge.style.display = 'inline-flex';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function selectDebridMode(mode) {
+  state.debridMode = mode;
+  ['torbox','dual','realdebrid','stremthru'].forEach(m => {
+    const btn = document.getElementById('dm-' + m);
+    btn.className = 'debrid-mode-btn';
+    if (m === mode) {
+      if (m === 'torbox')      btn.classList.add('active-tb');
+      else if (m === 'dual')   btn.classList.add('active-dual');
+      else if (m === 'realdebrid') btn.classList.add('active-rd');
+      else if (m === 'stremthru')  btn.style.background = '#4a9eff';
+    }
+  });
+  // Mostrar/ocultar paineis de key
+  const tbPanel = document.getElementById('tb-panel');
+  const rdPanel = document.getElementById('rd-panel');
+  const stPanel = document.getElementById('st-panel');
+  
+  if (mode === 'stremthru') {
+    tbPanel.style.display = 'block';
+    rdPanel.style.display = 'block';
+    stPanel.style.display = 'block';
+  } else {
+    tbPanel.style.display = (mode === 'realdebrid') ? 'none' : 'block';
+    rdPanel.style.display = (mode === 'torbox') ? 'none' : 'block';
+    stPanel.style.display = 'none';
+  }
+  updateDebridBadge();
+}
+
+function updateDebridBadge() {
+  const badge = document.getElementById('native-debrid-badge');
+  const mode = state.debridMode;
+  if (mode === 'torbox') {
+    badge.className = 'debrid-badge badge-tb';
+    badge.textContent = '🟠 TorBox';
+  } else if (mode === 'realdebrid') {
+    badge.className = 'debrid-badge badge-rd';
+    badge.textContent = '🟣 Real-Debrid';
+  } else if (mode === 'stremthru') {
+    badge.className = 'debrid-badge';
+    badge.style.background = '#4a9eff';
+    badge.textContent = '🔵 Stremthru';
+  } else {
+    badge.className = 'debrid-badge badge-dual';
+    badge.textContent = '⚡ Dual';
+  }
+}
+
+function onDebridKeyInput() { /* feedback ao vivo se necessário */ }
+
+function toggleVisibility(inputId, btn) {
+  const el = document.getElementById(inputId);
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '🙈'; }
+  else { el.type = 'password'; btn.textContent = '👁'; }
+}
+
+async function testDebrid(provider) {
+  const statusMap = { torbox: 'tb-status', realdebrid: 'rd-status', stremthru: 'st-status' };
+  const keyMap = { torbox: 'tbKey', realdebrid: 'rdKey', stremthru: 'stKey' };
+  const statusEl = document.getElementById(statusMap[provider]);
+  const key = document.getElementById(keyMap[provider]).value.trim();
+
+  if (!key) {
+    statusEl.className = 'debrid-status err';
+    statusEl.textContent = '✗ Insira a API Key';
+    return;
+  }
+  statusEl.className = 'debrid-status wait';
+  statusEl.textContent = '⏳ Verificando…';
+
+  try {
+    // Usa proxy local para evitar CORS — /api/debrid/test/:provider?key=...
+    const res  = await fetch(`/api/debrid/test/${provider}?key=${encodeURIComponent(key)}`);
+    const data = await res.json();
+    if (data.ok) {
+      const label = (data.name || 'Autenticado') + (data.plan ? ' · ' + data.plan : '');
+      statusEl.className = 'debrid-status ok';
+      statusEl.textContent = '✔ ' + label;
+      const providerName = provider === 'torbox' ? 'TorBox' : provider === 'realdebrid' ? 'Real-Debrid' : 'Stremthru';
+      toast('✔ ' + providerName + ' conectado! ' + (data.name || ''), 'ok');
+    } else {
+      statusEl.className = 'debrid-status err';
+      statusEl.textContent = '✗ ' + (data.error || 'Erro desconhecido');
+    }
+  } catch (e) {
+    statusEl.className = 'debrid-status err';
+    statusEl.textContent = '✗ Falha: ' + e.message;
+  }
+}
+
+// ── Utilidades ────────────────────────────────────────────────────
+function sv(el, id) { document.getElementById(id).textContent = el.value; }
+
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (type === 'err' ? ' err' : type === 'ok' ? ' ok' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 3200);
+}
+
+function dot(id, s) { document.getElementById('d-' + id).className = 'dot ' + s; }
+function label(id, t) { document.getElementById('l-' + id).textContent = t; }
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab, .pane').forEach(e => e.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('pane-' + t.dataset.tab).classList.add('active');
+}));
+
+document.querySelectorAll('.tg[data-cat]').forEach(t => {
+  t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    const animeOn = document.querySelector('.tg[data-cat="anime"]').classList.contains('on');
+    document.getElementById('anime-hint').style.display = animeOn ? 'block' : 'none';
+  });
+});
+
+document.getElementById('skipBadBtn').addEventListener('click', function() { this.classList.toggle('on'); });
+document.getElementById('onlyLangBtn').addEventListener('click', function() { this.classList.toggle('on'); });
+document.getElementById('dedupeBtn').addEventListener('click', function() { this.classList.toggle('on'); });
+
+function getCats() { return [...document.querySelectorAll('.tg[data-cat].on')].map(t => t.dataset.cat); }
+
+async function loadEnv() {
+  try {
+    const env = await fetch('/api/env').then(r => r.json());
+    if (env.jackettUrl) document.getElementById('jackettUrl').value = env.jackettUrl;
+    if (env.jackettKey) document.getElementById('jackettKey').value = env.jackettKey;
+    dot('redis', env.redisOk ? 'ok' : 'err');
+    label('redis', env.redisOk ? `Redis` : 'Redis (offline)');
+  } catch {}
+}
+
+async function loadIndexers() {
+  const grid = document.getElementById('ix-grid');
+  const count = document.getElementById('ix-count');
+  const jackettUrl = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
+  const jackettKey = document.getElementById('jackettKey').value.trim();
+  if (!jackettUrl) { toast('Insira a URL do Jackett/Prowlarr', 'err'); return; }
+  grid.innerHTML = '<div class="ix-empty loading">Conectando ao Jackett...</div>';
+  count.textContent = 'Carregando...';
+  dot('jackett','wait'); label('jackett','Jackett / Prowlarr');
+  try {
+    const data = await fetch(`/api/indexers?url=${encodeURIComponent(jackettUrl)}&key=${encodeURIComponent(jackettKey)}`).then(r => r.json());
+    if (!data.ok) {
+      grid.innerHTML = `<div class="ix-empty">${data.error || 'Falha'}</div>`;
+      count.textContent = 'Falha ao carregar';
+      dot('jackett','err'); label('jackett','Jackett / Prowlarr');
+      return;
+    }
+    state.allIndexers = (data.indexers||[]).map(ix => ({
+      id: ix.id||ix.ID||ix.name,
+      name: ix.name||ix.id||ix.ID,
+      private: !!ix.private,
+      privacy: ix.privacy || null,
+    }));
+    const allIds = state.allIndexers.map(ix => ix.id);
+    const available = new Set(allIds);
+    const loaded = state.loadedPrefs;
+    const generalIds = loaded && Array.isArray(loaded.indexers) && !loaded.indexers.includes('all')
+      ? loaded.indexers.filter(id => available.has(id))
+      : allIds.slice();
+    state.selectedIndexers = generalIds.length ? generalIds : allIds.slice();
+    state.useAll = state.selectedIndexers.length === allIds.length;
+
+    renderIndexers(state.allIndexers);
+    document.getElementById('allBtn').classList.toggle('on', state.useAll);
+    count.textContent = `${state.allIndexers.length} indexers`;
+    dot('jackett','ok'); label('jackett',`Jackett / Prowlarr (${state.allIndexers.length})`);
+    toast(`${state.allIndexers.length} indexers carregados`, 'ok');
+  } catch(e) {
+    grid.innerHTML = `<div class="ix-empty">${e.message}</div>`;
+    count.textContent = 'Falha';
+    dot('jackett','err'); label('jackett','Jackett / Prowlarr');
+  }
+}
+
+function renderIndexers(list) {
+  renderIndexerGrid({
+    gridId: 'ix-grid',
+    list,
+    selectedIds: state.selectedIndexers,
+    change: syncSelected,
+  });
+}
+
+function renderIndexerGrid({ gridId, list, selectedIds, change }) {
+  const target = document.getElementById(gridId);
+  if (!list.length) { target.innerHTML = '<div class="ix-empty">Nenhum indexer configurado</div>'; return; }
+  target.innerHTML = '';
+  list.forEach(ix => {
+    const checked = selectedIds.includes(ix.id);
+    const div = document.createElement('label');
+    div.className = 'ix-item' + (checked ? ' on' : '');
+    div.dataset.id   = ix.id;
+    div.dataset.name = ix.name.toLowerCase();
+    const flags = [];
+    if (ix.private) flags.push('<span class="ix-flag private">Privado</span>');
+    div.innerHTML    = `<input type="checkbox" ${checked?'checked':''} /><span class="ix-name" title="${ix.name}">${ix.name}</span><span class="ix-flags">${flags.join('')}</span>`;
+    const input = div.querySelector('input');
+    input.addEventListener('change', () => { div.classList.toggle('on', input.checked); change(); });
+    div.addEventListener('click', e => {
+      if (e.target.tagName.toLowerCase() === 'input') return;
+      input.checked = !input.checked;
+      div.classList.toggle('on', input.checked);
+      change();
+    });
+    target.appendChild(div);
+  });
+}
+
+function syncSelected() {
+  state.selectedIndexers = [...document.querySelectorAll('#ix-grid .ix-item input:checked')]
+    .map(i => i.closest('.ix-item').dataset.id);
+  state.useAll = state.selectedIndexers.length === state.allIndexers.length;
+  document.getElementById('allBtn').classList.toggle('on', state.useAll);
+  renderIndexers(state.allIndexers);
+}
+
+function setAllIndexers(on) {
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    const input = el.querySelector('input');
+    input.checked = on;
+    el.classList.toggle('on', on);
+  });
+  syncSelected();
+}
+
+function filterIx(q) {
+  const text = q.toLowerCase().trim(); let visible = 0;
+  document.querySelectorAll('#ix-grid .ix-item').forEach(el => {
+    const ok = !text || el.dataset.name.includes(text);
+    el.style.display = ok ? '' : 'none';
+    if (ok) visible++;
+  });
+  document.getElementById('ix-count').textContent = `${visible}/${state.allIndexers.length} indexers visíveis`;
+}
+
+async function testConnection() {
+  return loadIndexers();
+}
+
+function getWeights() {
+  return {
+    language:   +document.getElementById('w-lang').value,
+    resolution: +document.getElementById('w-res').value,
+    seeders:    +document.getElementById('w-seed').value,
+    size:       +document.getElementById('w-size').value,
+    codec:      +document.getElementById('w-codec').value,
+  };
+}
+
+function preview() {
+  const w  = getWeights();
+  const pl = state.priorityLang;
+  const examples = [
+    { t: 'Duna.2021.1080p.BluRay.x265.Dublado', seeds: 850,  sizeGb: 6.2 },
+    { t: 'Dune.2021.2160p.UHD.REMUX.Atmos',     seeds: 1500, sizeGb: 58  },
+    { t: 'Dune.2021.1080p.WEBRip.x264',          seeds: 3200, sizeGb: 2.1 }
+  ];
+  function matchesPriority(t) {
+    if (!pl) return false;
+    if (pl === 'pt-br') return /(dublado|pt[-.]?br)/i.test(t);
+    if (pl === 'en')    return /\b(english|eng)\b/i.test(t);
+    if (pl === 'es')    return /(espa[nñ]ol|spanish)/i.test(t);
+    if (pl === 'fr')    return /(fran[cç]ais|french)/i.test(t);
+    return false;
+  }
+  function hasAnyLang(t) {
+    return /(dublado|pt[-.]?br|english|eng|espa[nñ]ol|fran[cç]ais)/i.test(t);
+  }
+  function calcScore(ex) {
+    let s = 0;
+    if (pl && matchesPriority(ex.t))       s += w.language * 25;
+    else if (/(multi|dual)/i.test(ex.t))   s += w.language * 10;
+    else if (hasAnyLang(ex.t))             s += w.language * 5;
+    else                                   s += w.language * 2;
+    if (/4k|2160/i.test(ex.t))      s += 4 * w.resolution * 10;
+    else if (/1080/i.test(ex.t))    s += 3 * w.resolution * 10;
+    else if (/720/i.test(ex.t))     s += 2 * w.resolution * 10;
+    if (/remux/i.test(ex.t))        s += 5 * 50;
+    else if (/bluray/i.test(ex.t))  s += 4 * 50;
+    else if (/webrip/i.test(ex.t))  s += 2.5 * 50;
+    s += ex.seeds * (w.seeders / 10);
+    s += Math.max(0, 10 - Math.abs(ex.sizeGb - 8)) * w.size;
+    if (/x265|hevc/i.test(ex.t))    s += 3 * w.codec * 5;
+    else if (/x264|avc/i.test(ex.t)) s += 2 * w.codec * 5;
+    return Math.round(s);
+  }
+  const scored = examples.map(e => ({ ...e, score: calcScore(e) })).sort((a,b) => b.score - a.score);
+  document.getElementById('preview-box').innerHTML = scored.map((e,i) =>
+    `${['🥇','🥈','🥉'][i]} Score: <strong style="color:var(--accent)">${e.score}</strong>\n   ${e.t}`
+  ).join('\n\n');
+}
+
+function encodeBaseURL(obj) {
+  const jsonStr = JSON.stringify(obj);
+  const utf8Str = unescape(encodeURIComponent(jsonStr));
+  return btoa(utf8Str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+function toggleDebridMode() {
+  document.getElementById('nativeDebridConfig').style.display = document.getElementById('useNativeDebrid').checked ? 'block' : 'none';
+  document.getElementById('stremThruConfig').style.display = document.getElementById('useStremThru').checked ? 'block' : 'none';
+}
+
+function toggleQbitMode() {
+  document.getElementById('qbitModeConfig').style.display = document.getElementById('enableP2P').checked ? 'block' : 'none';
+}
+
+function buildPrefs() {
+  const selected = state.selectedIndexers.length ? state.selectedIndexers : ['all'];
+  const isNative = document.getElementById('useNativeDebrid').checked;
+  const isStremThru = document.getElementById('useStremThru').checked;
+
+  const jackettUrl = document.getElementById('jackettUrl').value.trim().replace(/\/+$/, '');
+  const jackettKey = document.getElementById('jackettKey').value.trim();
+  const accessToken = document.getElementById('accessToken').value.trim();
+
+  const prefs = {
+    indexers: state.useAll ? ['all'] : selected,
+    categories: getCats(),
+    weights: getWeights(),
+    maxResults: +document.getElementById('maxResults').value,
+    slowThreshold: +document.getElementById('slowThreshold').value,
+    skipBadReleases: document.getElementById('skipBadBtn').classList.contains('on'),
+    priorityLang: state.priorityLang,
+    onlyDubbed: document.getElementById('onlyLangBtn').classList.contains('on'),
+    dedupe: document.getElementById('dedupeBtn').classList.contains('on'),
+    debrid: isNative || isStremThru,
+    enableP2P: document.getElementById('enableP2P').checked,
+    qbitMode: document.getElementById('qbitMode').value || 'private',
+    keywordBoost: document.getElementById('keywordBoost').value.trim(),
+    maxResultsPerIndexer: +document.getElementById('maxResultsPerIndexer').value || 0,
+  };
+
+  if (jackettUrl) prefs.jackett = { url: jackettUrl, key: jackettKey };
+  if (accessToken) prefs.token = accessToken;
+
+  // Debrid Nativo
+  if (isNative) {
+    const tbKey = document.getElementById('tbKey').value.trim();
+    const rdKey = document.getElementById('rdKey').value.trim();
+    
+    if (!tbKey && !rdKey) throw new Error('native_keys_missing');
+    
+    prefs.debridConfig = {
+      mode: tbKey && rdKey ? 'dual' : (tbKey ? 'torbox' : 'realdebrid'),
+      torboxKey: tbKey || '',
+      rdKey: rdKey || ''
+    };
+  }
+
+  // Stremthru
+  if (isStremThru) {
+    const stUrl = document.getElementById('stUrl').value.trim().replace(/\/$/, '');
+    const stStore1 = document.getElementById('stStore1').value;
+    const stToken1 = document.getElementById('stToken1').value.trim();
+    const stStore2 = document.getElementById('stStore2').value;
+    const stToken2 = document.getElementById('stToken2').value.trim();
+
+    if (!stToken1) throw new Error("stToken1_missing");
+
+    const storesArray = [{ c: stStore1, t: stToken1 }];
+    if (stStore2 && stToken2) {
+      storesArray.push({ c: stStore2, t: stToken2 });
+    }
+
+    prefs.stConfig = { url: stUrl, stores: storesArray };
+  }
+
+  // Nome do addon
+  if (isNative && isStremThru) {
+    prefs.addonName = 'ProwJack [ST]';
+  } else if (isNative) {
+    const nameMap = { torbox: 'ProwJack [TB]', realdebrid: 'ProwJack [RD]', dual: 'ProwJack PRO' };
+    prefs.addonName = nameMap[prefs.debridConfig.mode] || 'ProwJack PRO';
+  } else if (isStremThru) {
+    prefs.addonName = 'ProwJack [ST]';
+  } else {
+    prefs.addonName = 'ProwJack PRO';
+  }
+
+  return prefs;
+}
+
+function generate(openManifest = false) {
+  try {
+    const prefs = buildPrefs();
+    const configEncoded = encodeBaseURL(prefs);
+    history.replaceState({}, '', `/${configEncoded}/configure`);
+    
+    // Se Stremthru está ativo, gera URL do Stremthru Wrap
+    if (prefs.stConfig) {
+      const { stConfig, debrid, ...prowjackPrefs } = prefs;
+      const encoded = encodeBaseURL(prowjackPrefs);
+      const prowjackManifest = `${location.origin}/${encoded}/manifest.json`;
+      
+      const storeCodeMap = { torbox: 'tb', realdebrid: 'rd', alldebrid: 'ad', debridlink: 'dl', premiumize: 'pm', offcloud: 'oc' };
+      const wrapConfig = {
+        upstreams: [{ u: prowjackManifest }],
+        stores: prefs.stConfig.stores.map(s => ({ c: storeCodeMap[s.c] || s.c, t: s.t })),
+        name: 'ProwJack [ST]'
+      };
+      
+      const wrapEncoded = btoa(JSON.stringify(wrapConfig));
+      const finalManifestUrl = `${prefs.stConfig.url}/stremio/wrap/${wrapEncoded}/manifest.json`;
+      const finalStremioUrl = finalManifestUrl.replace('https://', 'stremio://');
+
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        alert("⚠️ AVISO: Usando 'localhost', o StremThru remoto não conseguirá acessar este ProwJack. Use seu IP ou domínio público!");
+      }
+
+      document.getElementById('ibox-url').textContent = finalManifestUrl;
+      document.getElementById('ibox-url').className = 'ibox-url';
+
+      const link = document.getElementById('stremio-a');
+      link.href = finalStremioUrl;
+      link.style.pointerEvents = 'auto';
+      link.style.opacity = '1';
+
+      toast('✔ URL do Stremthru Wrap gerada!', 'ok');
+      if (openManifest) window.open(finalManifestUrl, '_blank', 'noopener');
+      return finalManifestUrl;
+    }
+    
+    const encoded = encodeBaseURL(prefs);
+    const finalManifestUrl = `${location.origin}/${encoded}/manifest.json`;
+    const finalStremioUrl = `stremio://${location.host}/${encoded}/manifest.json`;
+
+    document.getElementById('ibox-url').textContent = finalManifestUrl;
+    document.getElementById('ibox-url').className = 'ibox-url';
+
+    const link = document.getElementById('stremio-a');
+    link.href = finalStremioUrl;
+    link.style.pointerEvents = 'auto';
+    link.style.opacity = '1';
+
+    const langLabel = prefs.priorityLang
+      ? `Idioma: ${prefs.priorityLang.toUpperCase()}` + (prefs.onlyDubbed ? ' (apenas)' : ' (prioritário)')
+      : 'Sem preferência de idioma';
+
+    const debridLabel = prefs.debridConfig
+      ? ` · Debrid: ${prefs.debridConfig.mode.toUpperCase()}`
+      : '';
+
+    toast(`✔ URL gerada! ${langLabel}${debridLabel}`, 'ok');
+    if (openManifest) window.open(finalManifestUrl, '_blank', 'noopener');
+    return finalManifestUrl;
+  } catch (err) {
+    if (err.message === 'stToken1_missing') {
+      toast('ERRO: O Token do Serviço 1 é obrigatório!', true);
+      document.getElementById('stToken1').focus();
+    } else if (err.message === 'native_keys_missing') {
+      toast('ERRO: Configure ao menos uma chave (TorBox ou Real-Debrid)!', true);
+      document.getElementById('tbKey').focus();
+    } else {
+      toast('Erro desconhecido', true);
+    }
+    return null;
+  }
+}
+
+function openManifestTest() {
+  generate(true);
+}
+
+function copyUrl() {
+  const url = document.getElementById('ibox-url').textContent;
+  if (url.startsWith('—')) { toast('Gere a URL primeiro', 'err'); return; }
+  navigator.clipboard.writeText(url).then(() => toast('URL copiada!', 'ok'));
+}
+
+async function loadMetrics() {}
+async function delMetric() {}
+async function checkRedis() {}
+
+// ── Init ──────────────────────────────────────────────────────────
+window.addEventListener('load', async () => {
+  const initialPrefs = getPrefsFromLocation();
+  const defaultLangBtn = document.querySelector('.lang-btn[data-lang="pt-br"]');
+  if (defaultLangBtn) selectLang(defaultLangBtn);
+  selectDebridMode('dual');
+  toggleQbitMode(); // Inicializa visibilidade do painel qBit
+  await loadEnv();
+  if (initialPrefs) applyPrefsToForm(initialPrefs);
+  await loadIndexers();
+  if (initialPrefs) generate();
+  preview();
+});
+</script>
+</body>
+</html>

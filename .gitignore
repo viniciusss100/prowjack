@@ -1,0 +1,30 @@
+# Credenciais e configurações sensíveis
+.env
+*.pem
+*.key
+*.crt
+
+# Dependências
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+logs/
+
+# Redis data
+redis_data/
+
+# qBittorrent downloads
+downloads/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

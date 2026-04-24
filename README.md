@@ -9,7 +9,8 @@ ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/
 ## ✨ Funcionalidades
 
 ### 🎯 Core
-- **Integração Jackett/Prowlarr**: Busca em múltiplos indexadores públicos e privados
+- **Integração Prowlarr**: Busca em múltiplos indexadores públicos e privados
+- **Catálogo RSS Privado**: Polling automático dos indexers privados do Prowlarr com catálogo de lançamentos recentes no Stremio
 - **Suporte Debrid**: Real-Debrid e TorBox com cache automático
 - **qBittorrent**: Streaming direto de torrents privados via HTTP
 - **Priorização PT-BR**: Sistema inteligente de ranking por idioma
@@ -39,7 +40,71 @@ ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/
 
 ---
 
-## 📦 Instalação
+## 📡 Catálogo RSS de Trackers Privados
+
+O ProwJack PRO inclui um sistema de catálogo automático baseado no feed RSS dos indexers privados configurados no **Prowlarr**. Isso permite visualizar lançamentos recentes diretamente no Stremio, sem precisar buscar manualmente.
+
+### Como funciona
+
+1. A cada 45 minutos, o addon consulta o feed RSS de todos os indexers marcados como `private` ou `semiPrivate` no Prowlarr
+2. Os itens são salvos no Redis com TTL de 24h
+3. Os metadados (poster, descrição, nota) são resolvidos via Cinemeta e salvos em catálogo separado
+4. O catálogo aparece no Stremio como **"[Nome do Addon] — Lançamentos"** para filmes e séries
+5. Ao clicar num item, o stream handler busca diretamente no cache RSS (sem nova consulta ao Prowlarr)
+6. Os buffers dos arquivos `.torrent` são cacheados no Redis (TTL 7 dias) para evitar re-downloads
+
+### Requisitos
+
+- **Prowlarr** (recomendado) — suporta filtro por `privacy: private/semiPrivate`
+- Jackett pode ser usado, mas não distingue indexers públicos de privados (todos aparecem no catálogo)
+
+### Configuração
+
+No `.env`:
+```bash
+# URL do Prowlarr (deve ser acessível de dentro do container)
+JACKETT_URL=http://prowlarr:9696
+
+# API Key do Prowlarr (Settings → General → API Key)
+JACKETT_API_KEY=sua_api_key_aqui
+
+# Token de acesso ao addon (opcional — protege streams contra uso não autorizado)
+# Deve ser preenchido também no campo "Token de Acesso" na UI de configuração
+ACCESS_TOKEN=
+```
+
+> **Nota sobre rede Docker:** Se o Prowlarr não estiver na mesma rede Docker, use o IP do gateway (ex: `http://172.18.0.1:9696`). Verifique com `docker inspect prowjack | grep Gateway`.
+
+### Proteção por Token
+
+Quando `ACCESS_TOKEN` está definido no `.env`:
+- Streams e debrid-add exigem que o manifest tenha sido gerado com o mesmo token
+- Catálogo e meta são públicos (necessário para o Stremio Web/Android funcionar)
+- Configure o token na UI antes de gerar o manifest
+
+### Seletividade de Indexers
+
+Na UI de configuração, é possível selecionar quais indexers privados participam do catálogo RSS. Deixe vazio para usar todos os privados detectados.
+
+### Chaves Redis
+
+| Chave | Conteúdo | TTL |
+|-------|----------|-----|
+| `rss:v12-native-debrid:{indexerId}:{type}:*` | Itens do feed por indexer e tipo | 24h |
+| `rss:catalog:movie` | Catálogo de filmes (metadados Cinemeta) | 6h |
+| `rss:catalog:series` | Catálogo de séries (metadados Cinemeta) | 6h |
+| `torrent:{hash}` | Buffer do arquivo `.torrent` | 7 dias |
+
+Para limpar o catálogo manualmente:
+```bash
+docker exec prowjack node -e "
+const Redis = require('ioredis');
+const r = new Redis(process.env.REDIS_URL);
+r.keys('rss:catalog:*').then(async k => { if(k.length) await r.del(...k); r.disconnect(); });
+"
+```
+
+---
 
 ### Docker Compose (Recomendado)
 
@@ -90,9 +155,13 @@ npm start
 Edite o arquivo `.env`:
 
 ```bash
-# Jackett/Prowlarr (OBRIGATÓRIO)
-JACKETT_URL=http://localhost:9696
+# Prowlarr (recomendado) ou Jackett
+# Use o nome do serviço Docker ou IP do gateway se não estiver na mesma rede
+JACKETT_URL=http://prowlarr:9696
 JACKETT_API_KEY=sua_api_key_aqui
+
+# Token de acesso ao addon (opcional — protege streams contra uso não autorizado)
+ACCESS_TOKEN=
 
 # Redis (Recomendado)
 REDIS_URL=redis://localhost:6379
@@ -368,6 +437,13 @@ Contribuições são bem-vindas! Por favor:
 ---
 
 ## 📝 Changelog
+
+### v3.11.0 (2026-04-24)
+- ✨ **Catálogo RSS**: Polling automático de indexers privados do Prowlarr com catálogo de lançamentos no Stremio
+- ✨ **Cache de .torrent**: Buffers cacheados no Redis (TTL 7 dias) para evitar re-downloads
+- ✨ **Token de acesso**: Proteção opcional contra uso não autorizado do addon
+- 🚀 **Fast-path RSS**: Streams de itens do catálogo buscam diretamente no cache Redis
+- 🐛 **Bugfix**: Compatibilidade com Stremio Web/Android para catálogo de séries
 
 ### v3.10.1 (2024-04-15)
 - 🔒 **Segurança**: CORS configurável, rate limiting, validação de entrada
