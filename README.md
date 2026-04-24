@@ -483,11 +483,7 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para m
 
 ---
 
-## 📞 Suporte
 
-- **Issues**: [GitHub Issues](https://github.com/seu-usuario/prowjack-pro/issues)
-- **Discussões**: [GitHub Discussions](https://github.com/seu-usuario/prowjack-pro/discussions)
-- **Discord**: [Link do servidor](https://discord.gg/seu-servidor)
 
 ---
 
