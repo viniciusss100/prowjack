@@ -1,4 +1,4 @@
-# 🎬 ProwJack PRO
+# 🎬 ProwJack
 
 **Addon Stremio otimizado para Jackett/Prowlarr com suporte a Debrid e qBittorrent**
 
@@ -132,7 +132,7 @@ services:
 
 ```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/prowjack-pro.git
+git clone https://github.com/viniciusss100/prowjack-vercel.git
 cd prowjack-pro
 
 # Instale as dependências
@@ -480,10 +480,6 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para m
 - **Real-Debrid/TorBox**: Serviços de debrid
 - **qBittorrent**: Cliente torrent
 - **Comunidade**: Todos os contribuidores e usuários
-
----
-
-
 
 ---
 
