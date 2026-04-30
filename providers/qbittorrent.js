@@ -1,11 +1,3 @@
-/**
- * providers/qbittorrent.js
- *
- * Backend de streaming via qBittorrent para trackers privados e públicos.
- * O addon reutiliza torrents locais, sobe o .torrent ou adiciona magnet,
- * escolhe o arquivo principal e expõe o vídeo por HTTP.
- */
-
 const fs = require("fs");
 const path = require("path");
 const { injectTrackers } = require("../torrentEnrich");
@@ -93,24 +85,11 @@ async function qbitApi(endpoint, options = {}, creds = null) {
   return res;
 }
 
-// ─────────────────────────────────────────────────────────
-// FIX PRINCIPAL: addTorrentBuffer agora usa FormData + Blob NATIVOS do Node.js 18+
-//
-// Problema original: o código usava `require('form-data')` (pacote npm) que cria um
-// stream Readable do Node.js — incompatível com o fetch() nativo (undici) que espera
-// tipos da Web API (FormData, Blob, ArrayBuffer, ReadableStream web, etc.).
-// O upload do .torrent falhava silenciosamente, o torrent nunca era adicionado ao
-// qBittorrent e o player não conseguia reproduzir.
-//
-// Solução: FormData e Blob globais (Node.js 18+) são 100% compatíveis com fetch nativo.
-// O Content-Type multipart com boundary é definido automaticamente pelo fetch.
-// ─────────────────────────────────────────────────────────
 async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
   if (!Buffer.isBuffer(torrentBuffer) || !torrentBuffer.length) {
     throw new Error("Buffer .torrent inválido");
   }
 
-  // Injeta trackers extras para aumentar a conectividade (essencial em torrents de trackers privados)
   let enrichedBuffer;
   try {
     enrichedBuffer = injectTrackers(torrentBuffer);
@@ -119,11 +98,8 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
     enrichedBuffer = torrentBuffer;
   }
 
-  const savePath = path.join(QBIT_SAVE_DIR, infoHash.toLowerCase());
+  const savePath = QBIT_SAVE_DIR;
 
-  // Usa FormData NATIVA (global no Node.js 18+) — compatível com fetch nativo.
-  // NÃO usar require('form-data'): aquele pacote gera um Node.js Readable stream
-  // que o fetch nativo (undici) não aceita corretamente como corpo multipart.
   const form = new FormData();
   form.append("savepath", savePath);
   form.append("category", QBIT_CATEGORY);
@@ -131,7 +107,7 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
   form.append("sequentialDownload", "true");
   form.append("firstLastPiecePrio", "true");
   form.append("autoTMM", "false");
-  // Blob nativo (Node.js 18+): representa o arquivo .torrent com o MIME correto
+
   form.append(
     "torrents",
     new Blob([enrichedBuffer], { type: "application/x-bittorrent" }),
@@ -140,8 +116,6 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
 
   console.log(`[qBit] Enviando .torrent (original=${torrentBuffer.length}b enriquecido=${enrichedBuffer.length}b) para ${infoHash}...`);
 
-  // Não definimos Content-Type nos headers — o fetch nativo detecta FormData e
-  // define automaticamente: "multipart/form-data; boundary=----FormBoundary..."
   const res = await qbitApi("/api/v2/torrents/add", {
     method: "POST",
     body: form,
@@ -154,7 +128,6 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
     throw new Error(`Erro API qBit (${res.status}): ${text}`);
   }
 
-  // "Fails." pode indicar torrent já existente — não é erro crítico
   if (text === "Fails.") {
     const existing = await getTorrentInfo(infoHash, creds).catch(() => null);
     if (existing) return;
@@ -170,7 +143,7 @@ async function addMagnet(infoHash, magnet, creds = null) {
     throw new Error("Magnet inválido");
   }
 
-  const savePath = path.join(QBIT_SAVE_DIR, infoHash.toLowerCase());
+  const savePath = QBIT_SAVE_DIR;
   const body = new URLSearchParams({
     urls: magnet,
     savepath: savePath,
@@ -194,7 +167,6 @@ async function addMagnet(infoHash, magnet, creds = null) {
     throw new Error(`Erro API qBit (${res.status}): ${text}`);
   }
 
-  // "Fails." pode indicar torrent já existente — não é erro crítico
   if (text === "Fails.") {
     const existing = await getTorrentInfo(infoHash, creds).catch(() => null);
     if (existing) return;
@@ -254,7 +226,7 @@ async function setFilePriority(infoHash, fileId, priority, creds = null) {
 async function prioritizeMainFile(infoHash, fileIdx, fileName, creds = null) {
   const files = await getTorrentFiles(infoHash, creds);
   const target = pickTargetFile(files, fileIdx, fileName);
-  if (!target) return null; // metadados ainda não chegaram — sem erro
+  if (!target) return null; 
 
   await Promise.allSettled(
     files.map(file =>
@@ -343,16 +315,13 @@ async function getPlayableLocalFile(infoHash, fileIdx, fileName, creds = null) {
   return { info, file, filePath, isComplete };
 }
 
-// FIX #4: resolveFilePath agora tenta a subpasta do hash antes do fallback genérico.
-// O torrent é salvo em QBIT_SAVE_DIR/{infoHash}/ (definido em addTorrentBuffer/addMagnet),
-// mas a versão anterior tentava QBIT_SAVE_DIR/{relative} diretamente, que sempre falha.
 function resolveFilePath(info, file) {
   const relative = String(file.name || "")
     .replace(/^\/+/, "")
     .replace(/\.\./g, "")
-    .replace(/%2e/gi, "")     // bloquear encoding
-    .replace(/%252e/gi, "")   // bloquear double encoding
-    .replace(/\\/g, "/");     // normalizar separadores
+    .replace(/%2e/gi, "")    
+    .replace(/%252e/gi, "")  
+    .replace(/\\/g, "/");     
 
   if (!relative || relative.includes("..") || relative.includes("%") || relative.includes("\\")) {
     throw new Error("Path inválido detectado");
@@ -360,7 +329,6 @@ function resolveFilePath(info, file) {
 
   const base = path.resolve(QBIT_SAVE_DIR);
 
-  // Verifica se o caminho resolvido está dentro de QBIT_SAVE_DIR
   const safePath = (p) => {
     const resolved = path.resolve(p);
     if (!resolved.startsWith(base + path.sep) && resolved !== base) {
@@ -369,17 +337,14 @@ function resolveFilePath(info, file) {
     return p;
   };
 
-  // 1ª tentativa: caminho direto em QBIT_SAVE_DIR (ex: arquivo avulso)
   const byDir = path.join(QBIT_SAVE_DIR, relative);
   if (fs.existsSync(byDir)) return safePath(byDir);
 
-  // 2ª tentativa: subpasta do hash — onde addTorrentBuffer/addMagnet salva o torrent
   if (info.hash) {
     const byHash = path.join(QBIT_SAVE_DIR, info.hash.toLowerCase(), relative);
     if (fs.existsSync(byHash)) return safePath(byHash);
   }
 
-  // 3ª tentativa: content_path retornado pelo qBittorrent (caminho absoluto do conteúdo)
   const root = info.content_path || path.join(QBIT_SAVE_DIR, info.name || "");
   const normalizedRoot = path.normalize(root);
   if (normalizedRoot.endsWith(path.normalize(relative))) return safePath(normalizedRoot);
