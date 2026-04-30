@@ -53,18 +53,21 @@ async function resolveItemHash(item) {
 
 // Detecta indexers privados via API do Prowlarr ou Jackett
 async function fetchPrivateIndexers(jUrl, jKey) {
+  const catalogFilter = (process.env.RSS_CATALOG_INDEXERS || "").trim();
+
   // Tenta Prowlarr primeiro
   try {
     const res = await axios.get(`${jUrl}/api/v1/indexer`, {
       params: { apikey: jKey }, timeout: 8000, validateStatus: () => true,
     });
     if (res.status < 400 && Array.isArray(res.data)) {
-      const privates = res.data
-        .filter(ix => ix.privacy === "private" || ix.privacy === "semiPrivate")
-        .map(ix => ({ id: String(ix.id), name: String(ix.name || ix.id) }));
-      if (privates.length) return privates;
-      // Prowlarr respondeu mas sem privados — retorna todos configurados
-      return res.data.map(ix => ({ id: String(ix.id), name: String(ix.name || ix.id) }));
+      const all = res.data.map(ix => ({ id: String(ix.id), name: String(ix.name || ix.id) }));
+      // Se RSS_CATALOG_INDEXERS definido, usa todos (inclui públicos); senão só privados
+      if (catalogFilter) return all;
+      const privates = all.filter((_, i) =>
+        res.data[i].privacy === "private" || res.data[i].privacy === "semiPrivate"
+      );
+      return privates.length ? privates : all;
     }
   } catch {}
 
@@ -153,10 +156,11 @@ async function fetchIndexerRss(jUrl, jKey, indexerId, indexerName, rc) {
       params: { apikey: jKey, t: "search", q: "" },
       timeout: 20000, responseType: "text", validateStatus: () => true,
     });
-    if (res.status >= 400) return [];
+    if (res.status === 429) { console.log(`[RSS] ${indexerName || indexerId}: rate limit (429) — em cooldown`); return []; }
+    if (res.status >= 400) { console.log(`[RSS] ${indexerName || indexerId}: HTTP ${res.status}`); return []; }
     const items = parseRssItems(String(res.data || ""), indexerId, indexerName);
 
-    // Resolve infoHash em background e re-salva no Redis conforme resolve
+    // Resolve infoHash e ImdbId em background e re-salva no Redis
     setImmediate(async () => {
       let idx = 0;
       let updated = false;
@@ -171,6 +175,14 @@ async function fetchIndexerRss(jUrl, jKey, indexerId, indexerName, rc) {
               if (result.buffer) {
                 await rc.setBuffer(`torrent:${result.hash}`, result.buffer, 7 * 24 * 3600).catch(() => {});
               }
+            }
+          }
+          if (!item.ImdbId) {
+            const { clean, year } = parseTorrentTitle(item.Title || "");
+            if (clean && clean.length >= 3) {
+              const stremioType = item._rssType === "series" ? "series" : "movie";
+              const meta = await resolveImdbByTitle(clean, year, stremioType).catch(() => null);
+              if (meta?.id) { item.ImdbId = meta.id; updated = true; }
             }
           }
         }
@@ -316,49 +328,50 @@ async function updateCatalog(rc, newItems) {
       : [];
 
     const resolved = [];
-    for (const item of items) {
-      // Tenta usar imdbId direto do feed
-      let imdbId = item.ImdbId ? (item.ImdbId.startsWith("tt") ? item.ImdbId : `tt${item.ImdbId}`) : null;
-      let meta   = null;
+    let idx = 0;
+    async function resolveWorker() {
+      while (idx < items.length) {
+        const item = items[idx++];
+        let imdbId = item.ImdbId ? (item.ImdbId.startsWith("tt") ? item.ImdbId : `tt${item.ImdbId}`) : null;
+        let meta = null;
 
-      if (imdbId) {
-        // Busca metadados direto pelo id
-        try {
+        if (imdbId) {
+          try {
+            const stremioType = type === "movie" ? "movie" : "series";
+            const r = await axios.get(`https://v3-cinemeta.strem.io/meta/${stremioType}/${imdbId}.json`, { timeout: 5000 });
+            meta = r.data?.meta;
+          } catch {}
+        }
+
+        if (!meta) {
+          const { clean, year } = parseTorrentTitle(item.Title);
+          if (!clean || clean.length < 3) continue;
           const stremioType = type === "movie" ? "movie" : "series";
-          const r = await axios.get(`https://v3-cinemeta.strem.io/meta/${stremioType}/${imdbId}.json`, { timeout: 5000 });
-          meta = r.data?.meta;
-        } catch {}
+          meta = await resolveImdbByTitle(clean, year, stremioType);
+          if (meta) {
+            imdbId = meta.id || meta.imdb_id;
+            if (imdbId && !item.ImdbId) item.ImdbId = imdbId; // propaga de volta por referência
+          }
+        }
+
+        if (!meta || !imdbId) continue;
+        if (seenIds.has(imdbId)) continue;
+        seenIds.add(imdbId);
+
+        resolved.push({
+          id:          type === "movie" ? `rssmovie:${imdbId}` : `rssmeta:${type}:${imdbId.replace(/^tt/i,"")}`,
+          type:        type === "movie" ? "movie" : "series",
+          name:        meta.name || meta.title || item.Title,
+          poster:      meta.poster || null,
+          background:  meta.background || null,
+          description: meta.description || null,
+          releaseInfo: meta.releaseInfo || meta.year || null,
+          imdbRating:  meta.imdbRating || null,
+          _addedAt:    Date.now(),
+        });
       }
-
-      if (!meta) {
-        // Fallback: busca por título
-        const { clean, year } = parseTorrentTitle(item.Title);
-        if (!clean || clean.length < 3) continue;
-        const stremioType = type === "movie" ? "movie" : "series";
-        meta = await resolveImdbByTitle(clean, year, stremioType);
-        if (meta) imdbId = meta.id || meta.imdb_id;
-      }
-
-      if (!meta || !imdbId) continue;
-      if (seenIds.has(imdbId)) continue;
-      seenIds.add(imdbId);
-
-      resolved.push({
-        id:          imdbId,
-        type:        type === "movie" ? "movie" : "series",
-        name:        meta.name || meta.title || item.Title,
-        poster:      meta.poster || null,
-        background:  meta.background || null,
-        description: meta.description || null,
-        releaseInfo: meta.releaseInfo || meta.year || null,
-        imdbRating:  meta.imdbRating || null,
-        genres:      meta.genres || [],
-        _addedAt:    Date.now(),
-      });
-
-      // Pausa para não sobrecarregar Cinemeta
-      await new Promise(r => setTimeout(r, 300));
     }
+    await Promise.all(Array.from({ length: 5 }, resolveWorker));
 
     if (!resolved.length) continue;
 
@@ -377,14 +390,38 @@ async function pollOnce(jUrl, jKey, rc) {
     console.log("[RSS] Nenhum indexer privado encontrado.");
     return;
   }
-  console.log(`[RSS] ${indexers.length} indexers privados: ${indexers.map(i => i.name).join(", ")}`);
+  
+  // RSS_CATALOG_INDEXERS: controla quais indexers são polled E geram catálogo
+  const catalogFilter = (process.env.RSS_CATALOG_INDEXERS || "").trim();
+  const indexersToPoll = catalogFilter
+    ? indexers.filter(ix => {
+        const tokens = catalogFilter.toLowerCase().split(",").map(s => s.trim());
+        return tokens.includes(String(ix.id)) || tokens.some(t => ix.name.toLowerCase().includes(t));
+      })
+    : indexers;
 
-  for (const ix of indexers) {
+  console.log(`[RSS] ${indexers.length} indexers privados: ${indexers.map(i => i.name).join(", ")}`);
+  if (catalogFilter) {
+    console.log(`[RSS] Polling limitado a: ${indexersToPoll.map(i => i.name).join(", ")}`);
+  }
+
+  const allItems = [];
+  for (const ix of indexersToPoll) {
     const items = await fetchIndexerRss(jUrl, jKey, ix.id, ix.name, rc);
-    if (items.length) await saveToRedis(rc, ix.id, ix.name, items);
-    await new Promise(r => setTimeout(r, 1000));
+    if (items.length) {
+      await saveToRedis(rc, ix.id, ix.name, items, true);
+      allItems.push(...items);
+    }
+    await new Promise(r => setTimeout(r, 3000));
   }
   console.log("[RSS] Polling concluído.");
+
+  if (allItems.length) {
+    await rc.del(`${CATALOG_KEY}:movie`).catch(() => {});
+    await rc.del(`${CATALOG_KEY}:series`).catch(() => {});
+    await rc.del(`${CATALOG_KEY}:anime`).catch(() => {});
+    setImmediate(() => updateCatalog(rc, allItems).catch(() => {}));
+  }
 }
 
 function startRssPoller(jUrl, jKey, rc, redisClient) {
@@ -413,4 +450,4 @@ function startRssPoller(jUrl, jKey, rc, redisClient) {
   console.log(`[RSS] Poller agendado (intervalo: ${POLL_INTERVAL_MS / 60000} min)`);
 }
 
-module.exports = { startRssPoller, buildRssCacheKey, CATALOG_KEY };
+module.exports = { startRssPoller, buildRssCacheKey, CATALOG_KEY, updateCatalog };
