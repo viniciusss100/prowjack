@@ -121,4 +121,22 @@ function injectTrackers(buffer, extraTrackers = EXTRA_TRACKERS) {
   }
 }
 
-module.exports = { injectTrackers, EXTRA_TRACKERS };
+function extractTrackers(buffer) {
+  try {
+    const torrent = bdecode(buffer, 0).value;
+    const trackers = new Set();
+    const ann = torrent["announce"];
+    if (ann) { const s = Buffer.isBuffer(ann) ? ann.toString("utf8") : String(ann); if (s.startsWith("http") || s.startsWith("udp")) trackers.add(s); }
+    if (Array.isArray(torrent["announce-list"])) {
+      for (const tier of torrent["announce-list"]) {
+        for (const tr of (Array.isArray(tier) ? tier : [tier])) {
+          const s = Buffer.isBuffer(tr) ? tr.toString("utf8") : String(tr);
+          if (s.startsWith("http") || s.startsWith("udp")) trackers.add(s);
+        }
+      }
+    }
+    return [...trackers];
+  } catch { return []; }
+}
+
+module.exports = { injectTrackers, extractTrackers, EXTRA_TRACKERS };
