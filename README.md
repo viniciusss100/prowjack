@@ -1,4 +1,4 @@
-# 🎬 ProwJack PRO
+# 🎬 ProwJack
 
 **Addon Stremio otimizado para Jackett/Prowlarr com suporte a Debrid e qBittorrent**
 
@@ -132,7 +132,7 @@ services:
 
 ```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/prowjack-pro.git
+git clone https://github.com/viniciusss100/prowjack-vercel.git
 cd prowjack-pro
 
 # Instale as dependências
@@ -155,34 +155,35 @@ npm start
 Edite o arquivo `.env`:
 
 ```bash
-# Prowlarr (recomendado) ou Jackett
-# Use o nome do serviço Docker ou IP do gateway se não estiver na mesma rede
+# Prowlarr (recomendado — suporta filtro de indexers privados para catálogo RSS)
+# Use o IP do host se o Prowlarr não estiver na mesma rede Docker
 JACKETT_URL=http://prowlarr:9696
-JACKETT_API_KEY=sua_api_key_aqui
+JACKETT_API_KEY=your_prowlarr_api_key_here
 
-# Token de acesso ao addon (opcional — protege streams contra uso não autorizado)
+# Token de acesso (opcional) — impede uso não autorizado do addon
+# Deve ser preenchido também no campo "Token de Acesso" na UI de configuração
 ACCESS_TOKEN=
 
-# Redis (Recomendado)
+# Redis
 REDIS_URL=redis://localhost:6379
 
-# Real-Debrid / TorBox (Opcional - configurado via interface)
-STREMTHRU_URL=https://st.omcx.ddns.net/v0/torznab/api
-STREMTHRU_API_KEY=sua_key_aqui
+# RSS Catalog — Indexers que terão catálogo gerado (IDs ou nomes separados por vírgula)
+# Deixe vazio para incluir todos os indexers privados no catálogo
+# Exemplo: RSS_CATALOG_INDEXERS=5,11,CapybaraBR
+RSS_CATALOG_INDEXERS=
 
-# qBittorrent (Opcional - para torrents privados)
+# Scrap — Manifests de addons externos para busca adicional (separados por vírgula)
+# Streams desses addons têm prioridade sobre trackers privados, mas não sobre debrid
+# Exemplo: SCRAP_MANIFEST_URLS=https://torrentio.strem.fun/manifest.json,https://outro.addon/manifest.json
+SCRAP_MANIFEST_URLS=
+
+# qBittorrent
 QBIT_URL=http://localhost:8080
 QBIT_USER=admin
-QBIT_PASS=sua_senha_aqui
+QBIT_PASS=your_qbit_password_here
 QBIT_SAVE_DIR=/data/prowjack
-QBIT_MIN_PROGRESS=0.01
+QBIT_MIN_PROGRESS=0.01 
 QBIT_BUFFER_TIMEOUT=180
-
-# Segurança (Opcional)
-ALLOWED_ORIGINS=https://app.strem.io,https://web.stremio.com
-
-# Porta do servidor
-PORT=7014
 ```
 
 ### Configuração via Interface Web
@@ -480,14 +481,6 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para m
 - **Real-Debrid/TorBox**: Serviços de debrid
 - **qBittorrent**: Cliente torrent
 - **Comunidade**: Todos os contribuidores e usuários
-
----
-
-## 📞 Suporte
-
-- **Issues**: [GitHub Issues](https://github.com/seu-usuario/prowjack-pro/issues)
-- **Discussões**: [GitHub Discussions](https://github.com/seu-usuario/prowjack-pro/discussions)
-- **Discord**: [Link do servidor](https://discord.gg/seu-servidor)
 
 ---
 
