@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>ProwJack — Configurar</title>
+<title>ProwJack PRO — Configurar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <style>
@@ -280,9 +280,9 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
         <div class="card-title">Opções</div>
         <div class="tg-row">
           <button class="tg on" id="skipBadBtn">Skip CAM/TS</button>
-          <button class="tg on" id="onlyLangBtn">Apenas idioma</button>
+          <button class="tg" id="onlyLangBtn">Apenas idioma</button>
           <button class="tg on" id="dedupeBtn">Deduplicar</button>
-          <button class="tg on" id="enableCatalogBtn" title="Exibe catálogo RSS no Stremio">Catálogo RSS</button>
+          <button class="tg" id="enableCatalogBtn" title="Exibe catálogo RSS no Stremio">Catálogo RSS</button>
         </div>
 
         <label class="lbl">⭐ Boost por Keywords</label>
@@ -432,29 +432,8 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
           <span style="font-size:13px;font-weight:500">P2P (qBittorrent + Magnet Links)</span>
         </label>
         <div class="info" style="margin-left:24px;margin-bottom:10px">P2P deve estar ativo para usar StremThru ou magnet links nativos no Stremio.</div>
-        <div class="debrid-panel qbit-panel" id="qbitModeConfig">
-          <div class="panel-title qbit">qBittorrent</div>
-          <label class="lbl">Modo</label>
-          <select id="qbitMode" class="sel">
-            <option value="private">🔒 Apenas Trackers Privados (Recomendado)</option>
-            <option value="always">🌐 Sempre Disponível</option>
-          </select>
-          <div class="g2">
-            <div class="full">
-              <label class="lbl">URL</label>
-              <input type="text" id="qbitUrl" placeholder="http://localhost:8080"/>
-            </div>
-            <div>
-              <label class="lbl">Usuário</label>
-              <input type="text" id="qbitUser" placeholder="admin" style="margin-bottom:0"/>
-            </div>
-            <div>
-              <label class="lbl">Senha</label>
-              <input type="password" id="qbitPass" placeholder="senha" style="margin-bottom:0"/>
-            </div>
-          </div>
-          <div class="info mt8">Deixe em branco para usar <code>QBIT_URL</code>, <code>QBIT_USER</code>, <code>QBIT_PASS</code> do <code>.env</code>.</div>
-        </div>
+        <div class="info" style="margin-left:24px;margin-bottom:10px">QbitTorrent apenas em instancias autohospedadas, configurado no .env .</div>
+
       </div>
     </div>
 
