@@ -1,6 +1,6 @@
 {
   "name": "prowjack-pro",
-  "version": "3.0.0",
+  "version": "3.12.0",
   "description": "ProwJack PRO — Jackett Stremio Addon",
   "main": "addon.js",
   "scripts": {
