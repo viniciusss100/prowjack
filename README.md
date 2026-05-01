@@ -174,11 +174,11 @@ REDIS_URL=redis://localhost:6379
 # RSS Catalog — Indexers que terão catálogo gerado (IDs ou nomes separados por vírgula)
 # Deixe vazio para incluir todos os indexers privados no catálogo
 # Exemplo: RSS_CATALOG_INDEXERS=5,11,CapybaraBR
-RSS_CATALOG_INDEXERS=ThepirataFilmes
+RSS_CATALOG_INDEXERS=
 # Scrap — Manifests de addons externos para busca adicional (separados por vírgula)
 # Streams desses addons têm prioridade sobre trackers privados, mas não sobre debrid
 # Exemplo: SCRAP_MANIFEST_URLS=https://torrentio.strem.fun/manifest.json,https://outro.addon/manifest.json
-# SCRAP_MANIFEST_URLS=
+SCRAP_MANIFEST_URLS=
 
 # qBittorrent (Opcional - para torrents privados)
 QBIT_URL=http://localhost:8080
