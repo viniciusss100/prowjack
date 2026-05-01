@@ -1,8 +1,8 @@
-# 🎬 ProwJack
+# 🎬 ProwJack PRO
 
-**Addon Stremio otimizado para Jackett/Prowlarr com suporte a Debrid e qBittorrent**
+**Addon Stremio v3.12 otimizado para Jackett/Prowlarr com suporte a Debrid, StremThru, P2P e qBittorrent HTTP**
 
-ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/Prowlarr com serviços Debrid (Real-Debrid, TorBox) e qBittorrent, oferecendo streaming de alta qualidade com priorização inteligente de idioma PT-BR.
+ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/Prowlarr com serviços Debrid (Real-Debrid, TorBox), StremThru, P2P nativo e qBittorrent HTTP opcional, oferecendo streaming de alta qualidade com priorização inteligente de idioma PT-BR.
 
 ---
 
@@ -10,9 +10,10 @@ ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/
 
 ### 🎯 Core
 - **Integração Prowlarr**: Busca em múltiplos indexadores públicos e privados
-- **Catálogo RSS Privado**: Polling automático dos indexers privados do Prowlarr com catálogo de lançamentos recentes no Stremio
-- **Suporte Debrid**: Real-Debrid e TorBox com cache automático
-- **qBittorrent**: Streaming direto de torrents privados via HTTP
+- **Catálogo RSS**: Polling automático de indexers do Prowlarr/Jackett com catálogo de lançamentos recentes no Stremio
+- **Suporte Debrid**: Real-Debrid, TorBox e StremThru
+- **P2P nativo**: Magnet/infoHash direto no Stremio quando Debrid não está ativo
+- **qBittorrent HTTP**: Streaming direto de torrents via HTTP em instâncias auto-hospedadas
 - **Priorização PT-BR**: Sistema inteligente de ranking por idioma
 - **Cache Distribuído**: Redis + fallback em memória
 - **Anime Support**: Detecção automática e indexadores especializados
@@ -37,12 +38,13 @@ ProwJack PRO é um addon avançado para Stremio que integra indexadores Jackett/
 - **ReDoS Prevention**: Timeout em regex complexas
 - **Input Validation**: Sanitização de todos os parâmetros
 - **Buffer Overflow Protection**: Validação de tamanho de buffers
+- **Configuração opaca**: URLs novas usam `cfg_...` salvo no backend, evitando chaves Debrid/qBit diretamente na URL
 
 ---
 
-## 📡 Catálogo RSS de Trackers Privados
+## 📡 Catálogo RSS
 
-O ProwJack PRO inclui um sistema de catálogo automático baseado no feed RSS dos indexers privados configurados no **Prowlarr**. Isso permite visualizar lançamentos recentes diretamente no Stremio, sem precisar buscar manualmente.
+O ProwJack PRO inclui um sistema de catálogo automático baseado no feed RSS dos indexers configurados no **Prowlarr/Jackett**. Isso permite visualizar lançamentos recentes diretamente no Stremio, sem precisar buscar manualmente.
 
 ### Como funciona
 
@@ -50,13 +52,16 @@ O ProwJack PRO inclui um sistema de catálogo automático baseado no feed RSS do
 2. Os itens são salvos no Redis com TTL de 24h
 3. Os metadados (poster, descrição, nota) são resolvidos via Cinemeta e salvos em catálogo separado
 4. O catálogo aparece no Stremio como **"[Nome do Addon] — Lançamentos"** para filmes e séries
-5. Ao clicar num item, o stream handler busca diretamente no cache RSS (sem nova consulta ao Prowlarr)
+5. Ao clicar num item, o stream handler busca diretamente no cache RSS filtrado pelos indexers da configuração atual
 6. Os buffers dos arquivos `.torrent` são cacheados no Redis (TTL 7 dias) para evitar re-downloads
 
 ### Requisitos
 
 - **Prowlarr** (recomendado) — suporta filtro por `privacy: private/semiPrivate`
 - Jackett pode ser usado, mas não distingue indexers públicos de privados (todos aparecem no catálogo)
+- Processo Node persistente. Em plataformas serverless como Vercel, o poller em memória/setInterval não é confiável; use VPS/Docker ou um worker/cron externo para alimentar o Redis.
+
+> **Importante sobre Vercel/serverless:** Redis configurado não basta para o catálogo RSS funcionar. O Redis só armazena os dados; quem popula esses dados é o poller RSS (`startRssPoller`) rodando em processo persistente. Em Vercel, a função pode ser encerrada antes do intervalo rodar ou não ficar viva para manter o catálogo atualizado. Streams sob demanda funcionam melhor em serverless; catálogo RSS exige VPS/Docker ou um job externo chamando uma rotina de polling.
 
 ### Configuração
 
@@ -84,7 +89,7 @@ Quando `ACCESS_TOKEN` está definido no `.env`:
 
 ### Seletividade de Indexers
 
-Na UI de configuração, é possível selecionar quais indexers privados participam do catálogo RSS. Deixe vazio para usar todos os privados detectados.
+Na UI de configuração, a seleção de indexers também limita o que aparece no catálogo RSS daquela instalação. Deixe `Todos` para usar tudo que o poller salvou no Redis.
 
 ### Chaves Redis
 
@@ -132,7 +137,7 @@ services:
 
 ```bash
 # Clone o repositório
-git clone https://github.com/viniciusss100/prowjack-vercel.git
+git clone https://github.com/seu-usuario/prowjack-pro.git
 cd prowjack-pro
 
 # Instale as dependências
@@ -155,35 +160,34 @@ npm start
 Edite o arquivo `.env`:
 
 ```bash
-# Prowlarr (recomendado — suporta filtro de indexers privados para catálogo RSS)
-# Use o IP do host se o Prowlarr não estiver na mesma rede Docker
+# Prowlarr (recomendado) ou Jackett
+# Use o nome do serviço Docker ou IP do gateway se não estiver na mesma rede
 JACKETT_URL=http://prowlarr:9696
-JACKETT_API_KEY=your_prowlarr_api_key_here
+JACKETT_API_KEY=sua_api_key_aqui
 
-# Token de acesso (opcional) — impede uso não autorizado do addon
-# Deve ser preenchido também no campo "Token de Acesso" na UI de configuração
+# Token de acesso ao addon (opcional — protege streams contra uso não autorizado)
 ACCESS_TOKEN=
 
-# Redis
+# Redis (Recomendado)
 REDIS_URL=redis://localhost:6379
 
-# RSS Catalog — Indexers que terão catálogo gerado (IDs ou nomes separados por vírgula)
-# Deixe vazio para incluir todos os indexers privados no catálogo
-# Exemplo: RSS_CATALOG_INDEXERS=5,11,CapybaraBR
-RSS_CATALOG_INDEXERS=
+# Real-Debrid / TorBox (Opcional - configurado via interface)
+STREMTHRU_URL=https://st.omcx.ddns.net/v0/torznab/api
+STREMTHRU_API_KEY=sua_key_aqui
 
-# Scrap — Manifests de addons externos para busca adicional (separados por vírgula)
-# Streams desses addons têm prioridade sobre trackers privados, mas não sobre debrid
-# Exemplo: SCRAP_MANIFEST_URLS=https://torrentio.strem.fun/manifest.json,https://outro.addon/manifest.json
-SCRAP_MANIFEST_URLS=
-
-# qBittorrent
+# qBittorrent (Opcional - para torrents privados)
 QBIT_URL=http://localhost:8080
 QBIT_USER=admin
-QBIT_PASS=your_qbit_password_here
+QBIT_PASS=sua_senha_aqui
 QBIT_SAVE_DIR=/data/prowjack
-QBIT_MIN_PROGRESS=0.01 
+QBIT_MIN_PROGRESS=0.01
 QBIT_BUFFER_TIMEOUT=180
+
+# Segurança (Opcional)
+ALLOWED_ORIGINS=https://app.strem.io,https://web.stremio.com
+
+# Porta do servidor
+PORT=7014
 ```
 
 ### Configuração via Interface Web
@@ -193,8 +197,8 @@ QBIT_BUFFER_TIMEOUT=180
    - **Indexadores**: Selecione os indexadores desejados
    - **Categorias**: Filmes, Séries, Anime
    - **Idioma**: Prioridade PT-BR, Dublado, Multi-Audio
-   - **Debrid**: Real-Debrid e/ou TorBox (modo dual suportado)
-   - **qBittorrent**: URL, usuário e senha
+   - **Debrid**: Real-Debrid/TorBox nativo ou StremThru
+- **qBittorrent HTTP**: opcional, somente em instância auto-hospedada com variáveis no `.env`
    - **Filtros**: Qualidade mínima, keywords, pesos
 3. Copie a URL gerada e adicione no Stremio
 
@@ -212,18 +216,22 @@ QBIT_BUFFER_TIMEOUT=180
 ### Modos de Operação
 
 #### 🔥 Modo Debrid (Recomendado)
-- **Cache Instantâneo**: Streams prontos para reprodução
-- **On-Demand**: Adiciona torrents automaticamente ao clicar
-- **Dual Mode**: Usa RD + TB simultaneamente para máxima disponibilidade
+- **Nativo**: Real-Debrid e/ou TorBox direto pelo ProwJack
+- **StremThru**: o ProwJack mantém URL própria e consulta o manifest proxy em tempo de execução
+- **Cache/On-demand**: links prontos quando cacheados; torrents não cacheados são enviados ao serviço conforme suporte do provedor
 
 #### ⚡ Modo qBittorrent
 - **Torrents Privados**: Suporte completo via upload de .torrent
 - **Streaming HTTP**: Reproduz enquanto baixa (buffer mínimo 1-2%)
 - **Priorização**: Foca no arquivo do episódio específico
+- **Configuração server-side**: usa apenas `QBIT_URL`, `QBIT_USER` e `QBIT_PASS` do `.env`; não é configurado pela URL do usuário
+- **Hospedagem**: não funciona em Vercel/serverless, porque precisa alcançar seu qBittorrent e servir arquivos locais por HTTP
 
-#### 🧲 Modo P2P (Fallback)
+#### 🧲 Modo P2P
 - **Magnet Links**: Envia magnets diretamente ao Stremio
-- **Sem Debrid**: Funciona sem serviços externos
+- **Sem Debrid**: funciona nativamente no Stremio
+- **Com Debrid/StremThru**: os magnets são usados como entrada para conversão em links Debrid
+- **Formatação**: streams P2P não exibem mais uma tag `P2P` na descrição para evitar confusão quando Debrid/StremThru está ativo
 
 ---
 
@@ -241,10 +249,10 @@ QBIT_BUFFER_TIMEOUT=180
    ├─ Magnet → Parse direto
    ├─ .torrent → Download + SHA1 do dict info
    └─ Fallback → InfoHash do Jackett
-5. Cache Check (se Debrid ativo):
-   ├─ Batch check nativo (RD/TB API)
-   ├─ StremThru (cache externo)
-   └─ Torznab sources (Zilean, Bitmagnet)
+5. Cache/Proxy:
+   ├─ Debrid nativo: batch check RD/TB
+   ├─ StremThru: manifest proxy gerado sem qBit e consumido pelo ProwJack
+   └─ Sem Debrid: magnets/infoHash nativos
 6. Ranking e Deduplicação:
    ├─ Cache > Uncached
    ├─ Idioma > Resolução > Qualidade
@@ -291,6 +299,9 @@ prowjack/
 - `GET /api/metrics` → Métricas de performance por indexador
 - `DELETE /api/metrics/:indexer` → Limpa métricas de um indexer
 - `GET /api/debrid/test/:provider` → Testa credenciais Debrid
+- `POST /api/config` → Salva configuração validada e retorna `cfg_...`
+
+Quando `ACCESS_TOKEN` está definido, rotas administrativas exigem `X-Access-Token` ou token válido na configuração.
 
 ### Internos
 
@@ -357,10 +368,20 @@ FLUSHDB
 ### Problema: qBittorrent não inicia stream
 
 **Solução:**
-1. Verifique se o qBittorrent está acessível
-2. Confirme que `QBIT_SAVE_DIR` existe e tem permissões
-3. Aumente `QBIT_BUFFER_TIMEOUT` se a conexão for lenta
-4. Verifique se o arquivo .torrent foi baixado corretamente
+1. Use VPS/Docker ou outra instância auto-hospedada; qBittorrent HTTP não funciona corretamente em Vercel/serverless
+2. Verifique se o qBittorrent está acessível a partir do servidor do ProwJack
+3. Confirme `QBIT_URL`, `QBIT_USER` e `QBIT_PASS` no `.env`
+4. Verifique se `QBIT_SAVE_DIR` existe e tem permissões
+5. Aumente `QBIT_BUFFER_TIMEOUT` se a conexão for lenta
+
+### Problema: Catálogo RSS vazio no Vercel
+
+**Causa:** o catálogo depende de um poller em processo persistente. Em Vercel/serverless, `setInterval` e processos longos não são confiáveis.
+
+**Solução:**
+1. Rode o ProwJack em VPS/Docker para que o poller RSS permaneça ativo
+2. Ou crie um worker/cron externo que execute o polling e alimente as chaves `rss:*` e `rss:catalog:*` no Redis
+3. Mantenha Redis persistente configurado; ele é necessário, mas não substitui o processo que popula o catálogo
 
 ### Problema: Rate limit atingido
 
@@ -439,6 +460,18 @@ Contribuições são bem-vindas! Por favor:
 
 ## 📝 Changelog
 
+### v3.12.0 (2026-05-01)
+- ✨ **Configuração segura**: URLs de instalação novas usam `cfg_...` salvo no backend; chaves Debrid/qBit deixam de ir diretamente na URL
+- 🔒 **Validação server-side**: `/api/config` sanitiza campos, limita números, valida serviços Debrid/StremThru e aceita apenas opções conhecidas
+- 🔒 **Rotas administrativas protegidas**: indexers, métricas, teste Debrid e teste Jackett exigem token quando `ACCESS_TOKEN` está ativo
+- ✨ **StremThru integrado ao ProwJack**: mantém URL própria do addon, gera upstream sem qBit, consulta o proxy com timeout maior e retorna streams Debrid ordenados
+- ✨ **qBittorrent HTTP opcional**: UI separa qBit de P2P nativo e deixa claro que qBit só funciona via `.env` em auto-hospedagem
+- ✨ **P2P nativo**: magnets/infoHash ficam ativos quando não há Debrid; Debrid/StremThru usam P2P como entrada de conversão
+- 🐛 **Real-Debrid**: cache check ficou read-only e não usa `addMagnet`; torrents existentes passam por `selectFiles` antes de unrestrict
+- 🐛 **Catálogo RSS**: catálogo retornado é filtrado pelos indexers da configuração atual, evitando dados de indexers anteriores
+- 🧹 **Formatação**: removida a tag visual `P2P` dos streams para evitar confusão quando Debrid/StremThru está ativo
+- 📚 **Hospedagem**: documentação e UI agora alertam sobre limitações de Vercel/serverless para catálogo RSS e qBittorrent
+
 ### v3.11.0 (2026-04-24)
 - ✨ **Catálogo RSS**: Polling automático de indexers privados do Prowlarr com catálogo de lançamentos no Stremio
 - ✨ **Cache de .torrent**: Buffers cacheados no Redis (TTL 7 dias) para evitar re-downloads
@@ -481,6 +514,14 @@ Este projeto é distribuído sob a licença MIT. Veja o arquivo `LICENSE` para m
 - **Real-Debrid/TorBox**: Serviços de debrid
 - **qBittorrent**: Cliente torrent
 - **Comunidade**: Todos os contribuidores e usuários
+
+---
+
+## 📞 Suporte
+
+- **Issues**: [GitHub Issues](https://github.com/seu-usuario/prowjack-pro/issues)
+- **Discussões**: [GitHub Discussions](https://github.com/seu-usuario/prowjack-pro/discussions)
+- **Discord**: [Link do servidor](https://discord.gg/seu-servidor)
 
 ---
 
