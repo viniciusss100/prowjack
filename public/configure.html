@@ -183,7 +183,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
   <div class="logo">
     <div class="logo-mark">🎬</div>
     <div>
-      <span class="logo-text">Prow<span>Jack</span><span class="logo-ver">v3.10</span></span>
+      <span class="logo-text">Prow<span>Jack</span><span class="logo-ver">v3.12</span></span>
       <div style="font-size:11px;color:var(--dim);margin-top:2px">Jackett · Prowlarr · Stremio</div>
     </div>
   </div>
@@ -284,6 +284,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
           <button class="tg on" id="dedupeBtn">Deduplicar</button>
           <button class="tg on" id="enableCatalogBtn" title="Exibe catálogo RSS no Stremio">Catálogo RSS</button>
         </div>
+        <div class="info" style="margin-top:-4px;margin-bottom:12px">Catálogo RSS requer uma instância persistente (VPS/Docker) ou worker/cron externo alimentando o Redis. Em Vercel/serverless, o poller interno não roda de forma confiável.</div>
 
         <label class="lbl">⭐ Boost por Keywords</label>
         <input type="text" id="keywordBoost" placeholder="ex: dual-bioma  ou  brremux  (palavras inteiras)" value="(\bremux\b|cypher|freddiegellar|dual-bioma|dual-c76|tossato|c0ral|dual-nogroup|dual-pia|dual-xor|dual-xar|g4ris|dual-sigma|andrehsa|riper|sigla|tontom|dual-eck|1-sf|0-sf|por-br|RARBR|TupaC|alfaHD|DUAL-cza|DUAL-7sprite7|potatin|Dual-fly|Brazilian|franceira)"/>
@@ -429,9 +430,9 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
 
         <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-bottom:10px">
           <input type="checkbox" id="enableP2P" checked style="width:15px;height:15px;accent-color:var(--amber)" onchange="toggleQbitMode()"/>
-          <span style="font-size:13px;font-weight:500">P2P (qBittorrent + Magnet Links)</span>
+          <span style="font-size:13px;font-weight:500">qBittorrent HTTP</span>
         </label>
-        <div class="info" style="margin-left:24px;margin-bottom:10px">P2P deve estar ativo para usar StremThru ou magnet links nativos no Stremio.</div>
+        <div class="info" style="margin-left:24px;margin-bottom:10px">Opcional. Só funciona em instância auto-hospedada com <code>QBIT_URL</code>, <code>QBIT_USER</code> e <code>QBIT_PASS</code> no <code>.env</code>. Magnet links nativos continuam ativos sem qBittorrent quando não há Debrid.</div>
         <div class="debrid-panel qbit-panel" id="qbitModeConfig">
           <div class="panel-title qbit">qBittorrent</div>
           <label class="lbl">Modo</label>
@@ -439,21 +440,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
             <option value="private">🔒 Apenas Trackers Privados (Recomendado)</option>
             <option value="always">🌐 Sempre Disponível</option>
           </select>
-          <div class="g2">
-            <div class="full">
-              <label class="lbl">URL</label>
-              <input type="text" id="qbitUrl" placeholder="http://localhost:8080"/>
-            </div>
-            <div>
-              <label class="lbl">Usuário</label>
-              <input type="text" id="qbitUser" placeholder="admin" style="margin-bottom:0"/>
-            </div>
-            <div>
-              <label class="lbl">Senha</label>
-              <input type="password" id="qbitPass" placeholder="senha" style="margin-bottom:0"/>
-            </div>
-          </div>
-          <div class="info mt8">Deixe em branco para usar <code>QBIT_URL</code>, <code>QBIT_USER</code>, <code>QBIT_PASS</code> do <code>.env</code>.</div>
+          <div class="info mt8">O qBittorrent usa apenas <code>QBIT_URL</code>, <code>QBIT_USER</code> e <code>QBIT_PASS</code> configurados no <code>.env</code> do servidor.</div>
         </div>
       </div>
     </div>
@@ -559,15 +546,11 @@ function applyPrefsToForm(prefs) {
     || document.querySelector('.lang-btn[data-lang="pt-br"]');
   if (langBtn) selectLang(langBtn);
 
-  document.getElementById('enableP2P').checked = prefs.enableP2P !== false;
-  document.getElementById('qbitMode').value = prefs.qbitMode || 'private';
+  const qbitEnabled = !!(prefs.qbitMode && prefs.qbitMode !== 'off');
+  document.getElementById('enableP2P').checked = qbitEnabled;
+  document.getElementById('qbitMode').value = qbitEnabled ? prefs.qbitMode : 'private';
   toggleQbitMode();
 
-  if (prefs.qbit) {
-    document.getElementById('qbitUrl').value  = prefs.qbit.url  || '';
-    document.getElementById('qbitUser').value = prefs.qbit.user || '';
-    document.getElementById('qbitPass').value = prefs.qbit.pass || '';
-  }
   if (prefs.debridConfig) {
     document.getElementById('useNativeDebrid').checked = true;
     document.getElementById('tbKey').value = prefs.debridConfig.torboxKey || '';
@@ -624,10 +607,10 @@ async function loadEnv() {
   try {
     const env = await fetch('/api/env').then(r => r.json());
     // Mostra apenas se está configurado, sem expor os valores
-    document.getElementById('env-url').textContent = env.jackettUrl ? '✔ configurado' : '(não configurado)';
-    document.getElementById('env-url').className = 'jk-env-val' + (env.jackettUrl ? '' : ' na');
-    document.getElementById('env-key').textContent = env.jackettKey ? '✔ configurado' : '(não configurado)';
-    document.getElementById('env-key').className = 'jk-env-val' + (env.jackettKey ? '' : ' na');
+    document.getElementById('env-url').textContent = env.jackettConfigured ? '✔ configurado' : '(não configurado)';
+    document.getElementById('env-url').className = 'jk-env-val' + (env.jackettConfigured ? '' : ' na');
+    document.getElementById('env-key').textContent = env.jackettKeyConfigured ? '✔ configurado' : '(não configurado)';
+    document.getElementById('env-key').className = 'jk-env-val' + (env.jackettKeyConfigured ? '' : ' na');
     dot('redis', env.redisOk ? 'ok' : 'err');
     label('redis', env.redisOk ? 'Redis' : 'Redis (offline)');
   } catch {}
@@ -656,7 +639,10 @@ async function loadIndexers() {
     const params = new URLSearchParams();
     if (jackettUrl) params.set('url', jackettUrl);
     if (jackettKey) params.set('key', jackettKey);
-    const data = await fetch(`/api/indexers?${params}`).then(r => r.json());
+    const token = document.getElementById('accessToken').value.trim();
+    const data = await fetch(`/api/indexers?${params}`, {
+      headers: token ? { 'X-Access-Token': token } : {},
+    }).then(r => r.json());
     if (!data.ok) {
       grid.innerHTML = `<div class="ix-empty">${data.error || 'Falha'}</div>`;
       dot('jackett','err'); label('jackett','Jackett (erro)');
@@ -746,8 +732,8 @@ function buildPrefs() {
     dedupe: document.getElementById('dedupeBtn').classList.contains('on'),
     enableCatalog: document.getElementById('enableCatalogBtn').classList.contains('on'),
     debrid: isNative || isStremThru,
-    enableP2P: document.getElementById('enableP2P').checked,
-    qbitMode: document.getElementById('qbitMode').value || 'private',
+    enableP2P: true,
+    qbitMode: document.getElementById('enableP2P').checked ? (document.getElementById('qbitMode').value || 'private') : 'off',
     keywordBoost: document.getElementById('keywordBoost').value.trim(),
     maxResultsPerIndexer: +document.getElementById('maxResultsPerIndexer').value || 0,
   };
@@ -760,14 +746,6 @@ function buildPrefs() {
     const key = document.getElementById('jackettKey').value.trim();
     if (url) prefs.jackett = { url, key };
   }
-
-  // qBittorrent
-  const qbitUrl = document.getElementById('qbitUrl').value.trim().replace(/\/+$/,'');
-  if (qbitUrl) prefs.qbit = {
-    url: qbitUrl,
-    user: document.getElementById('qbitUser').value.trim(),
-    pass: document.getElementById('qbitPass').value.trim(),
-  };
 
   // Debrid Nativo
   if (isNative) {
@@ -805,35 +783,55 @@ function buildPrefs() {
   return prefs;
 }
 
+async function saveServerConfig(prefs) {
+  const token = prefs.token || document.getElementById('accessToken').value.trim();
+  const res = await fetch('/api/config', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'X-Access-Token': token } : {}),
+    },
+    body: JSON.stringify(prefs),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok || !data.userConfig) throw new Error(data.error || 'Falha ao salvar configuração');
+  return data.userConfig;
+}
+
 // ── Generate ──────────────────────────────────────────────────────
-function generate(openManifest = false) {
+async function generate(openManifest = false) {
   try {
     const prefs = buildPrefs();
-    const configEncoded = encodeBaseURL(prefs);
-    history.replaceState({}, '', `/${configEncoded}/configure`);
 
     // StremThru Wrap
     if (prefs.stConfig) {
       const { stConfig, debrid, ...prowjackPrefs } = prefs;
-      const encoded = encodeBaseURL(prowjackPrefs);
-      const prowjackManifest = `${location.origin}/${encoded}/manifest.json`;
+      prowjackPrefs.enableP2P = true;
+      prowjackPrefs.qbitMode = 'off';
+      const upstreamRef = await saveServerConfig(prowjackPrefs);
+      const prowjackManifest = `${location.origin}/${upstreamRef}/manifest.json`;
       const storeCodeMap = { torbox:'tb', realdebrid:'rd', alldebrid:'ad', debridlink:'dl', premiumize:'pm', offcloud:'oc' };
       const wrapEncoded = btoa(JSON.stringify({
         upstreams: [{ u: prowjackManifest }],
         stores: prefs.stConfig.stores.map(s => ({ c: storeCodeMap[s.c]||s.c, t: s.t })),
         name: 'ProwJack [ST]',
       }));
-      const finalUrl = `${prefs.stConfig.url}/stremio/wrap/${wrapEncoded}/manifest.json`;
+      prefs.stConfig.proxyManifestUrl = `${prefs.stConfig.url}/stremio/wrap/${wrapEncoded}/manifest.json`;
+      const configRef = await saveServerConfig(prefs);
+      history.replaceState({}, '', `/${configRef}/configure`);
+      const finalUrl = `${location.origin}/${configRef}/manifest.json`;
       if (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
         alert("⚠️ Usando 'localhost' — o StremThru remoto não conseguirá acessar. Use seu IP ou domínio público!");
-      setInstallUrl(finalUrl, finalUrl.replace('https://', 'stremio://'));
-      toast('✔ URL StremThru Wrap gerada!', 'ok');
+      setInstallUrl(finalUrl, `stremio://${location.host}/${configRef}/manifest.json`);
+      toast('✔ URL ProwJack + StremThru gerada!', 'ok');
       if (openManifest) window.open(finalUrl, '_blank', 'noopener');
       return finalUrl;
     }
 
-    const finalUrl = `${location.origin}/${configEncoded}/manifest.json`;
-    setInstallUrl(finalUrl, `stremio://${location.host}/${configEncoded}/manifest.json`);
+    const configRef = await saveServerConfig(prefs);
+    history.replaceState({}, '', `/${configRef}/configure`);
+    const finalUrl = `${location.origin}/${configRef}/manifest.json`;
+    setInstallUrl(finalUrl, `stremio://${location.host}/${configRef}/manifest.json`);
     const langLabel = prefs.priorityLang
       ? `Idioma: ${prefs.priorityLang.toUpperCase()}` + (prefs.onlyDubbed ? ' (apenas)' : ' (prioritário)')
       : 'Sem preferência de idioma';
@@ -885,7 +883,7 @@ window.addEventListener('load', async () => {
   await loadEnv();
   if (initialPrefs) applyPrefsToForm(initialPrefs);
   await loadIndexers();
-  if (initialPrefs) generate();
+  if (initialPrefs) await generate();
 });
 </script>
 </body>
