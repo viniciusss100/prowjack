@@ -171,20 +171,22 @@ ACCESS_TOKEN=
 # Redis (Recomendado)
 REDIS_URL=redis://localhost:6379
 
-# Real-Debrid / TorBox (Opcional - configurado via interface)
-STREMTHRU_URL=https://st.omcx.ddns.net/v0/torznab/api
-STREMTHRU_API_KEY=sua_key_aqui
+# RSS Catalog — Indexers que terão catálogo gerado (IDs ou nomes separados por vírgula)
+# Deixe vazio para incluir todos os indexers privados no catálogo
+# Exemplo: RSS_CATALOG_INDEXERS=5,11,CapybaraBR
+RSS_CATALOG_INDEXERS=ThepirataFilmes
+# Scrap — Manifests de addons externos para busca adicional (separados por vírgula)
+# Streams desses addons têm prioridade sobre trackers privados, mas não sobre debrid
+# Exemplo: SCRAP_MANIFEST_URLS=https://torrentio.strem.fun/manifest.json,https://outro.addon/manifest.json
+# SCRAP_MANIFEST_URLS=
 
 # qBittorrent (Opcional - para torrents privados)
 QBIT_URL=http://localhost:8080
 QBIT_USER=admin
 QBIT_PASS=sua_senha_aqui
 QBIT_SAVE_DIR=/data/prowjack
-QBIT_MIN_PROGRESS=0.01
-QBIT_BUFFER_TIMEOUT=180
-
-# Segurança (Opcional)
-ALLOWED_ORIGINS=https://app.strem.io,https://web.stremio.com
+QBIT_MIN_PROGRESS=0.02
+QBIT_BUFFER_TIMEOUT=120
 
 # Porta do servidor
 PORT=7014
