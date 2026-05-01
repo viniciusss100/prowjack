@@ -470,7 +470,6 @@ Contribuições são bem-vindas! Por favor:
 - 🐛 **Real-Debrid**: cache check ficou read-only e não usa `addMagnet`; torrents existentes passam por `selectFiles` antes de unrestrict
 - 🐛 **Catálogo RSS**: catálogo retornado é filtrado pelos indexers da configuração atual, evitando dados de indexers anteriores
 - 🧹 **Formatação**: removida a tag visual `P2P` dos streams para evitar confusão quando Debrid/StremThru está ativo
-- 📚 **Hospedagem**: documentação e UI agora alertam sobre limitações de Vercel/serverless para catálogo RSS e qBittorrent
 
 ### v3.11.0 (2026-04-24)
 - ✨ **Catálogo RSS**: Polling automático de indexers privados do Prowlarr com catálogo de lançamentos no Stremio
