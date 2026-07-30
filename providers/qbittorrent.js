@@ -13,9 +13,13 @@ const { injectTrackers } = require("../torrentEnrich");
 const QBIT_URL      = (process.env.QBIT_URL      || "").replace(/\/+$/, "");
 const QBIT_USER     = process.env.QBIT_USER     || "";
 const QBIT_PASS     = process.env.QBIT_PASS     || "";
-const QBIT_SAVE_DIR = process.env.QBIT_SAVE_DIR || path.join(__dirname, "../downloads");
-if (!fs.existsSync(QBIT_SAVE_DIR)) {
-  fs.mkdirSync(QBIT_SAVE_DIR, { recursive: true });
+const QBIT_SAVE_DIR = process.env.QBIT_SAVE_DIR || path.join(require("os").tmpdir(), "prowjack-downloads");
+try {
+  if (!fs.existsSync(QBIT_SAVE_DIR)) {
+    fs.mkdirSync(QBIT_SAVE_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn("Aviso: não foi possível criar QBIT_SAVE_DIR:", e.message);
 }
 const QBIT_CATEGORY = process.env.QBIT_CATEGORY || "prowjack-private";
 const QBIT_TAGS     = process.env.QBIT_TAGS     || "prowjack";
