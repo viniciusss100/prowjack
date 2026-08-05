@@ -99,11 +99,12 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
       })
       .filter(r => r._priorityIndexer || r._scrapSource || type !== "movie" || !looksLikeEpisodeRelease(r.Title || ""))
       .filter(r => {
-        if (r._priorityIndexer || r._scrapSource) return true;
         if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) return true;
-        if (!prefs.onlyDubbed || !priorityLang) return true;
-        const langs = getLangs(r.Title || "", parsed.isAnime);
-        return langs.some(l => l.code === priorityLang);
+        if (prefs.onlyDubbed && priorityLang) {
+          const langs = getLangs(r.Title || "", parsed.isAnime);
+          if (!langs.some(l => l.code === priorityLang)) return false;
+        }
+        return true;
       })
       .sort((a, b) =>
         (((b._priorityIndexer ? 1 : 0) * 5000000) + score(b, prefs.weights, parsed.isAnime, priorityLang)) -
@@ -677,21 +678,25 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             return true;
           })
           .filter(r => {
+            // keywordBoost sempre passa (independente de idioma)
+            if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) {
+              r._titleMatchScore = 1; r._keywordMatch = true; return true;
+            }
+            // onlyDubbed=true: filtra por idioma TODOS os resultados (inclusive priority/scrap)
+            if (prefs.onlyDubbed && priorityLang) {
+              const titleForLang = r.Title || r._title || "";
+              const langs = getLangs(titleForLang, parsed.isAnime);
+              const hasLang = langs.some(l => l.code === priorityLang);
+              if (!hasLang) return false;
+            }
             if (r._priorityIndexer || r._scrapSource) {
               r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
               return true;
             }
-            if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) {
-              r._titleMatchScore = 1; r._keywordMatch = true; return true;
-            }
-            if (!prefs.onlyDubbed || !priorityLang) return true;
-            const langs   = getLangs(r.Title || "", parsed.isAnime);
-            const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
-            return hasLang;
+            return true;
           })
           .filter(r => {
-            if (r._priorityIndexer || r._scrapSource) return true;
-            if (r._keywordMatch || r._metaIdMatch) return true;
+            if (r._keywordMatch) return true;
             const resultImdbId = getResultImdbId(r);
             if (requestedImdbId && resultImdbId && resultImdbId === requestedImdbId) {
               // ImdbId bate: ainda verifica episódio para séries
@@ -701,8 +706,15 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
               r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
               r._metaIdMatch = true; return true;
             }
+            if (r._priorityIndexer || r._scrapSource || r._metaIdMatch) return true;
             const langs   = getLangs(r.Title || "", parsed.isAnime);
             const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+
+            // onlyDubbed: itens que chegaram aqui já passaram pelo filtro de idioma — aceita direto
+            if (prefs.onlyDubbed && priorityLang && hasLang) {
+              r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
+              return true;
+            }
 
             const sc           = titleMatchScore(r.Title || "", [displayTitle, ...aliases]);
             const relaxedScore = relaxedTitleMatchScore(r.Title || "", [displayTitle, ...aliases]);
@@ -866,34 +878,30 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const stCacheMap = {};
       const axios = require("axios");
 
-      for (const store of prefs.stConfig.stores) {
-        const chunked = [];
-        for (let i = 0; i < allHashesST.length; i += 5) chunked.push(allHashesST.slice(i, i + 5));
-
-        for (const chunk of chunked) {
-          await Promise.all(chunk.map(async hash => {
-             try {
-                const checkRes = await axios.get(`${prefs.stConfig.url}/v0/store/magnets/check?magnet=${hash}`, {
-                   headers: { "X-StremThru-Store-Name": store.c, "X-StremThru-Store-Authorization": `Bearer ${store.t}` },
-                   validateStatus: () => true, timeout: 6000
-                });
-                if (checkRes.status === 200 && checkRes.data?.data?.items) {
-                   const torrent = checkRes.data.data.items.find(t => t.hash?.toLowerCase() === hash);
-                   if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
-                      stCacheMap[hash] = true;
-                   }
-                }
-             } catch (e) {}
-          }));
-        }
-      }
+      // Faz todas as requisições em paralelo (sem agrupamento sequencial)
+      await Promise.all(prefs.stConfig.stores.flatMap(store =>
+        allHashesST.map(async hash => {
+          try {
+            const checkRes = await axios.get(`${prefs.stConfig.url}/v0/store/magnets/check?magnet=${hash}`, {
+              headers: { "X-StremThru-Store-Name": store.c, "X-StremThru-Store-Authorization": `Bearer ${store.t}` },
+              validateStatus: () => true, timeout: 5000,
+            });
+            if (checkRes.status === 200 && checkRes.data?.data?.items) {
+              const torrent = checkRes.data.data.items.find(t => t.hash?.toLowerCase() === hash);
+              if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
+                stCacheMap[hash] = true;
+              }
+            }
+          } catch {}
+        })
+      ));
 
       let cachedCount = 0;
       for (const r of withHashes) {
-         if (r._resolved?.infoHash && stCacheMap[r._resolved.infoHash.toLowerCase()]) {
-            r._isCached = true;
-            cachedCount++;
-         }
+        if (r._resolved?.infoHash && stCacheMap[r._resolved.infoHash.toLowerCase()]) {
+          r._isCached = true;
+          cachedCount++;
+        }
       }
       console.log(`[STREMTHRU] Cache check concluído em ${Date.now() - _tDebrid}ms. Cacheados: ${cachedCount}`);
     }
@@ -926,11 +934,11 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       .sort((a, b) => {
         const dc = candidateCacheRank(a) - candidateCacheRank(b); if (dc !== 0) return dc;
         const dpi = (b._priorityIndexer ? 1 : 0) - (a._priorityIndexer ? 1 : 0); if (dpi !== 0) return dpi;
-        const dz = (b.Size || 0) - (a.Size || 0); if (dz !== 0) return dz;
-        const dq = candidateQualScore(b) - candidateQualScore(a); if (dq !== 0) return dq;
-        const dr = candidateResScore(b) - candidateResScore(a); if (dr !== 0) return dr;
         const dl = candidateLangRank(a) - candidateLangRank(b); if (dl !== 0) return dl;
         const dk = candidateKeywordRank(a) - candidateKeywordRank(b); if (dk !== 0) return dk;
+        const dq = candidateQualScore(b) - candidateQualScore(a); if (dq !== 0) return dq;
+        const dr = candidateResScore(b) - candidateResScore(a); if (dr !== 0) return dr;
+        const dz = (b.Size || 0) - (a.Size || 0); if (dz !== 0) return dz;
         return (b.Seeders || 0) - (a.Seeders || 0);
       });
     const streamCandidateLimit = Math.max(maxOut * 3, 80);
@@ -1345,11 +1353,11 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const dh = _httpRank(a) - _httpRank(b); if (dh !== 0) return dh;
       const dc = _cacheRank(a) - _cacheRank(b); if (dc !== 0) return dc;
       const dpi = _priorityIndexerRank(a) - _priorityIndexerRank(b); if (dpi !== 0) return dpi;
-      const dz = _sizeScore(b) - _sizeScore(a); if (dz !== 0) return dz;
-      const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
-      const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
       const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
       const dk = _keywordRank(a) - _keywordRank(b); if (dk !== 0) return dk;
+      const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
+      const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
+      const dz = _sizeScore(b) - _sizeScore(a); if (dz !== 0) return dz;
       const dsr = _sourceRank(a) - _sourceRank(b); if (dsr !== 0) return dsr;
       return (b._seeders || 0) - (a._seeders || 0);
     });

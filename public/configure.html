@@ -295,9 +295,14 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
         </div>
         <div class="info" style="margin-top:-4px;margin-bottom:12px">Catálogo RSS requer uma instância persistente (VPS/Docker) ou worker/cron externo alimentando o Redis. Em Vercel/serverless, o poller interno não roda de forma confiável.</div>
 
-        <label class="lbl">⭐ Boost por Keywords</label>
-        <input type="text" id="keywordBoost" placeholder="ex: dual-bioma  ou  brremux  (palavras inteiras)" value="DUBLADO|1-sf|PORTUGUES|POR-BR|PTBR|ERAI-RAWS|BRAZILIAN|dual-(?!audio|lat|spa|fre|eng|turko)"/>
-        <div class="info" style="margin-top:-8px;margin-bottom:12px">Cada palavra é verificada como termo completo. Separe por espaço para exigir múltiplas palavras.</div>
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-bottom:10px">
+          <input type="checkbox" id="enableKeywordsBr" checked style="width:15px;height:15px;accent-color:var(--amber)" onchange="toggleKeywords()"/>
+          <span style="font-size:13px;font-weight:600;color:var(--accent)">⭐ Ativar Keywords (Brasil)</span>
+        </label>
+        <div id="keywordsConfig">
+          <input type="text" id="keywordBoost" placeholder="ex: dual-bioma  ou  brremux  (palavras inteiras)" value="DUBLADO|andremor|multi-audio|toonshub|oldt|0-sf|1-sf|PORTUGUES|POR-BR|PTBR|BRAZILIAN|dual-(?!lat|spa|fre|eng|turko|esp|trb|vf2|vf1|it.web|ita|yts)"/>
+          <div class="info" style="margin-top:-8px;margin-bottom:12px">Cada palavra é verificada como termo completo. Separe por espaço para exigir múltiplas palavras.</div>
+        </div>
 
         <div class="g3">
           <div>
@@ -575,7 +580,9 @@ function applyPrefsToForm(prefs) {
   document.getElementById('onlyLangBtn').classList.toggle('on', !!prefs.onlyDubbed);
   document.getElementById('dedupeBtn').classList.toggle('on', prefs.dedupe !== false);
   document.getElementById('enableCatalogBtn').classList.toggle('on', prefs.enableCatalog !== false);
-  document.getElementById('keywordBoost').value = prefs.keywordBoost || '';
+  document.getElementById('keywordBoost').value = prefs.keywordBoost || 'DUBLADO|andremor|multi-audio|toonshub|oldt|0-sf|1-sf|PORTUGUES|POR-BR|PTBR|BRAZILIAN|dual-(?!lat|spa|fre|eng|turko|esp|trb|vf2|vf1|it.web|ita|yts)';
+  document.getElementById('enableKeywordsBr').checked = !!prefs.keywordBoost;
+  toggleKeywords();
   document.getElementById('priorityIndexers').value = Array.isArray(prefs.priorityIndexers) ? prefs.priorityIndexers.join(', ') : (prefs.priorityIndexers || '');
   document.getElementById('rdExcludeKeywords').value = prefs.rdExcludeKeywords || '';
   document.getElementById('rdExcludeQualities').value = prefs.rdExcludeQualities || '';
@@ -638,6 +645,9 @@ function toggleDebridMode(changed) {
 }
 function toggleQbitMode() {
   document.getElementById('qbitModeConfig').style.display = document.getElementById('enableP2P').checked ? 'block' : 'none';
+}
+function toggleKeywords() {
+  document.getElementById('keywordsConfig').style.display = document.getElementById('enableKeywordsBr').checked ? 'block' : 'none';
 }
 
 // ── Utilitários ───────────────────────────────────────────────────
@@ -787,7 +797,7 @@ function buildPrefs() {
     debrid: isNative || isStremThru,
     enableP2P: true,
     qbitMode: document.getElementById('enableP2P').checked ? (document.getElementById('qbitMode').value || 'private') : 'off',
-    keywordBoost: document.getElementById('keywordBoost').value.trim(),
+    keywordBoost: document.getElementById('enableKeywordsBr').checked ? document.getElementById('keywordBoost').value.trim() : '',
     priorityIndexers: document.getElementById('priorityIndexers').value.split(/[,\n;|]+/).map(s => s.trim()).filter(Boolean),
     rdExcludeKeywords: document.getElementById('rdExcludeKeywords').value.trim(),
     rdExcludeQualities: document.getElementById('rdExcludeQualities').value.trim(),
