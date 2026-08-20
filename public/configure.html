@@ -205,28 +205,22 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
 
   <!-- ── Sidebar nav ── -->
   <nav class="sidebar">
-    <button class="nav-item active" data-sec="connection" onclick="showSection(this)">
+    <button class="nav-item active" data-sec="conexao" onclick="showSection(this)">
       <span class="nav-icon">🔌</span> Conexão
     </button>
-    <button class="nav-item" data-sec="filters" onclick="showSection(this)">
-      <span class="nav-icon">🎛️</span> Filtros
-    </button>
-    <button class="nav-item" data-sec="indexers" onclick="showSection(this)">
-      <span class="nav-icon">📡</span> Indexers
+    <button class="nav-item" data-sec="preferencias" onclick="showSection(this)">
+      <span class="nav-icon">🎛️</span> Preferências
     </button>
     <button class="nav-item" data-sec="debrid" onclick="showSection(this)">
-      <span class="nav-icon">⚡</span> Debrid
-    </button>
-    <button class="nav-item" data-sec="install" onclick="showSection(this)">
-      <span class="nav-icon">🚀</span> Instalar
+      <span class="nav-icon">⚡</span> Debrid &amp; Instalar
     </button>
   </nav>
 
   <!-- ── Main ── -->
   <div class="main">
 
-    <!-- ══ CONEXÃO ══ -->
-    <div class="section active" id="sec-connection">
+    <!-- ══ CONEXÃO + INDEXERS ══ -->
+    <div class="section active" id="sec-conexao">
       <div class="card">
         <div class="card-title">Instância Jackett / Prowlarr</div>
 
@@ -269,10 +263,28 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
           <button class="btn btn-p btn-sm" onclick="loadIndexers()">Conectar e Carregar Indexers</button>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-title">Indexers</div>
+        <div class="ix-toolbar">
+          <button class="btn btn-s btn-sm on" id="allBtn" onclick="setAllIndexers(true)">Todos</button>
+          <button class="btn btn-s btn-sm" onclick="setAllIndexers(false)">Nenhum</button>
+          <input class="ix-search" id="ix-search" type="text" placeholder="Filtrar…" oninput="filterIx(this.value)"/>
+          <span class="info" id="ix-count">Carregando…</span>
+        </div>
+        <div class="ix-grid" id="ix-grid">
+          <div class="ix-empty loading">⏳ Carregando indexers…</div>
+        </div>
+        <div class="mt12">
+          <label class="lbl">Indexers Prioritários sem Filtros</label>
+          <input type="text" id="priorityIndexers" placeholder="IDs ou nomes separados por vírgula"/>
+          <div class="info" style="margin-top:-8px">Resultados desses indexers furam filtros de idioma/título/ano e sobem na ordenação.</div>
+        </div>
+      </div>
     </div>
 
-    <!-- ══ FILTROS ══ -->
-    <div class="section" id="sec-filters">
+    <!-- ══ PREFERÊNCIAS ══ -->
+    <div class="section" id="sec-preferencias">
       <div class="card">
         <div class="card-title">Categorias</div>
         <div class="tg-row">
@@ -293,15 +305,15 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
           <button class="tg on" id="dedupeBtn">Deduplicar</button>
           <button class="tg on" id="enableCatalogBtn" title="Exibe catálogo RSS no Stremio">Catálogo RSS</button>
         </div>
-        <div class="info" style="margin-top:-4px;margin-bottom:12px">Catálogo RSS requer uma instância persistente (VPS/Docker) ou worker/cron externo alimentando o Redis. Em Vercel/serverless, o poller interno não roda de forma confiável.</div>
+        <div class="info" style="margin-top:-4px;margin-bottom:12px">Catálogo RSS requer instância persistente (VPS/Docker) ou cron externo alimentando o Redis.</div>
 
         <label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-bottom:10px">
           <input type="checkbox" id="enableKeywordsBr" checked style="width:15px;height:15px;accent-color:var(--amber)" onchange="toggleKeywords()"/>
           <span style="font-size:13px;font-weight:600;color:var(--accent)">⭐ Ativar Keywords (Brasil)</span>
         </label>
         <div id="keywordsConfig">
-          <input type="text" id="keywordBoost" placeholder="ex: dual-bioma  ou  brremux  (palavras inteiras)" value="DUBLADO|andremor|multi-audio|toonshub|oldt|0-sf|1-sf|PORTUGUES|POR-BR|PTBR|BRAZILIAN|dual-(?!lat|spa|fre|eng|turko|esp|trb|vf2|vf1|it.web|ita|yts)"/>
-          <div class="info" style="margin-top:-8px;margin-bottom:12px">Cada palavra é verificada como termo completo. Separe por espaço para exigir múltiplas palavras.</div>
+          <input type="text" id="keywordBoost" placeholder="ex: dual-bioma  ou  brremux" value="DUBLADO|multi-audio|0-sf|1-sf|PORTUGUES|POR-BR|PTBR|BRAZILIAN|dual-(?!audio|lat|spa|french|turko|esp|trb|vf1|vf2|yts)"/>
+          <div class="info" style="margin-top:-8px;margin-bottom:12px">Separe por <code>|</code> para alternativas ou espaço para exigir múltiplas palavras.</div>
         </div>
 
         <div class="g3">
@@ -333,29 +345,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
       </div>
     </div>
 
-    <!-- ══ INDEXERS ══ -->
-    <div class="section" id="sec-indexers">
-      <div class="card">
-        <div class="card-title">Indexers</div>
-        <div class="ix-toolbar">
-          <button class="btn btn-s btn-sm on" id="allBtn" onclick="setAllIndexers(true)">Todos</button>
-          <button class="btn btn-s btn-sm" onclick="setAllIndexers(false)">Nenhum</button>
-          <input class="ix-search" id="ix-search" type="text" placeholder="Filtrar…" oninput="filterIx(this.value)"/>
-          <span class="info" id="ix-count">Carregando…</span>
-        </div>
-        <div class="ix-grid" id="ix-grid">
-          <div class="ix-empty loading">⏳ Carregando indexers…</div>
-        </div>
-        <div class="mt12">
-          <label class="lbl">Indexers Prioritários sem Filtros</label>
-          <input type="text" id="priorityIndexers" placeholder="IDs ou nomes separados por vírgula"/>
-          <div class="info" style="margin-top:-8px">Resultados desses indexers furam filtros de idioma/título/ano e sobem na ordenação.</div>
-        </div>
-        <div class="info mt12">Os indexers RSS são configurados via <code>RSS_CATALOG_INDEXERS</code> no <code>.env</code> do servidor.</div>
-      </div>
-    </div>
-
-    <!-- ══ DEBRID ══ -->
+    <!-- ══ DEBRID + INSTALAR ══ -->
     <div class="section" id="sec-debrid">
       <div class="card">
         <div class="card-title">Serviços Debrid</div>
@@ -374,8 +364,8 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
               <span class="badge badge-rd">Clássico</span>
             </div>
             <div class="ref-copy">Boa disponibilidade e modo dual com TorBox para comparar fontes.</div>
-            <a class="btn btn-rd" style="width:100%;justify-content:center" href="http://real-debrid.com/?id=6684575" target="_blank" rel="noreferrer">Assinar Real-Debrid</a>
-            <div class="rd-banner"><a href="http://real-debrid.com/?id=6684575" target="_blank" rel="noreferrer"><img src="https://real-debrid.com/static/images/banner/pt.png" alt="Real-Debrid"/></a></div>
+            <a class="btn btn-rd" style="width:100%;justify-content:center" href="https://real-debrid.com" target="_blank" rel="noreferrer">Assinar Real-Debrid</a>
+            <div class="rd-banner"><a href="https://real-debrid.com" target="_blank" rel="noreferrer"><img src="https://real-debrid.com/static/images/banner/pt.png" alt="Real-Debrid"/></a></div>
           </div>
         </div>
 
@@ -388,7 +378,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
         <div class="debrid-panel st-panel" id="stremThruConfig">
           <div class="panel-title st">StremThru</div>
           <label class="lbl">URL</label>
-          <input type="text" id="stUrl" placeholder="https://stremthru.13377001.xyz" value="https://stremthru.13377001.xyz"/>
+          <input type="text" id="stUrl" placeholder="URL do proxy StremThru" value="https://stremthru.13377001.xyz"/>
           <hr/>
           <div class="g2">
             <div>
@@ -471,7 +461,7 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
           <input type="checkbox" id="enableP2P" style="width:15px;height:15px;accent-color:var(--amber)" onchange="toggleQbitMode()"/>
           <span style="font-size:13px;font-weight:500">qBittorrent HTTP</span>
         </label>
-        <div class="info" style="margin-left:24px;margin-bottom:10px">Opcional. Só funciona em instância auto-hospedada com <code>QBIT_URL</code>, <code>QBIT_USER</code> e <code>QBIT_PASS</code> no <code>.env</code>. Magnet links nativos continuam ativos sem qBittorrent quando não há Debrid.</div>
+        <div class="info" style="margin-left:24px;margin-bottom:10px">Opcional. Requer <code>QBIT_URL</code>, <code>QBIT_USER</code> e <code>QBIT_PASS</code> no <code>.env</code>.</div>
         <div class="debrid-panel qbit-panel" id="qbitModeConfig">
           <div class="panel-title qbit">qBittorrent</div>
           <label class="lbl">Modo</label>
@@ -479,19 +469,14 @@ hr{border:none;border-top:1px solid var(--bord);margin:14px 0}
             <option value="private">🔒 Apenas Trackers Privados (Recomendado)</option>
             <option value="always">🌐 Sempre Disponível</option>
           </select>
-          <div class="info mt8">O qBittorrent usa apenas <code>QBIT_URL</code>, <code>QBIT_USER</code> e <code>QBIT_PASS</code> configurados no <code>.env</code> do servidor.</div>
         </div>
       </div>
-    </div>
 
-    <!-- ══ INSTALAR ══ -->
-    <div class="section" id="sec-install">
       <div class="card">
-        <div class="card-title">URL de Instalação</div>
+        <div class="card-title">Instalar</div>
         <div class="btn-row">
           <button class="btn btn-p" onclick="generate()">⚡ Gerar URL</button>
-          <button class="btn btn-s" onclick="openManifestTest()">🧪 Testar Manifest</button>
-          <button class="btn btn-s" onclick="copyUrl()">📋 Copiar</button>
+          <button class="btn btn-s" onclick="copyUrl()">📋 Copiar URL</button>
         </div>
         <div class="ibox">
           <div class="ibox-head">🔗 Manifest URL</div>
@@ -666,6 +651,7 @@ function getCats() { return [...document.querySelectorAll('.tg[data-cat].on')].m
 async function loadEnv() {
   try {
     const env = await fetch('/api/env').then(r => r.json());
+    const serverName = env.isProwlarr ? 'Prowlarr' : (env.serverType === 'jackett' ? 'Jackett' : 'Jackett/Prowlarr');
     // Mostra apenas se está configurado, sem expor os valores
     document.getElementById('env-url').textContent = env.jackettConfigured ? '✔ configurado' : '(não configurado)';
     document.getElementById('env-url').className = 'jk-env-val' + (env.jackettConfigured ? '' : ' na');
@@ -673,6 +659,8 @@ async function loadEnv() {
     document.getElementById('env-key').className = 'jk-env-val' + (env.jackettKeyConfigured ? '' : ' na');
     dot('redis', env.redisOk ? 'ok' : 'err');
     label('redis', env.redisOk ? 'Redis' : 'Redis (offline)');
+    // Store server type for later use
+    state.serverType = env.serverType || 'unknown';
   } catch {}
 }
 
@@ -680,6 +668,7 @@ async function loadEnv() {
 async function loadIndexers() {
   const grid = document.getElementById('ix-grid');
   const count = document.getElementById('ix-count');
+  const serverLabel = state.serverType === 'prowlarr' ? 'Prowlarr' : (state.serverType === 'jackett' ? 'Jackett' : 'Jackett/Prowlarr');
 
   // Determina URL/Key: manual ou env
   let jackettUrl, jackettKey;
@@ -694,7 +683,7 @@ async function loadIndexers() {
 
   grid.innerHTML = '<div class="ix-empty loading">Conectando…</div>';
   count.textContent = 'Carregando…';
-  dot('jackett','wait'); label('jackett','Jackett');
+  dot('jackett','wait'); label('jackett', serverLabel);
   try {
     const params = new URLSearchParams();
     if (jackettUrl) params.set('url', jackettUrl);
@@ -707,7 +696,7 @@ async function loadIndexers() {
     }).then(r => r.json());
     if (!data.ok) {
       grid.innerHTML = `<div class="ix-empty">${data.error || 'Falha'}</div>`;
-      dot('jackett','err'); label('jackett','Jackett (erro)');
+      dot('jackett','err'); label('jackett', `${serverLabel} (erro)`);
       return;
     }
     state.allIndexers = (data.indexers||[]).map(ix => ({
@@ -723,11 +712,11 @@ async function loadIndexers() {
     renderIndexers();
     document.getElementById('allBtn').classList.toggle('on', state.useAll);
     count.textContent = `${state.allIndexers.length} indexers`;
-    dot('jackett','ok'); label('jackett',`Jackett (${state.allIndexers.length})`);
+    dot('jackett','ok'); label('jackett',`${serverLabel} (${state.allIndexers.length})`);
     toast(`${state.allIndexers.length} indexers carregados`, 'ok');
   } catch(e) {
     grid.innerHTML = `<div class="ix-empty">${e.message}</div>`;
-    dot('jackett','err'); label('jackett','Jackett (erro)');
+    dot('jackett','err'); label('jackett', `${serverLabel} (erro)`);
   }
 }
 
@@ -901,7 +890,6 @@ function setInstallUrl(url, stremioUrl) {
   link.style.opacity = '1';
 }
 
-function openManifestTest() { generate(true); }
 function copyUrl() {
   const url = document.getElementById('ibox-url').textContent;
   if (url.startsWith('—')) { toast('Gere a URL primeiro', 'err'); return; }

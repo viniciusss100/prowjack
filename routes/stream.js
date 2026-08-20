@@ -86,7 +86,7 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
     const plan = await buildQueries(type, id);
     const indexers = await resolveSearchIndexers(prefs, parsed.isAnime);
     const results  = await jackettSearch({ parsed, queries: plan.queries, search: plan.search }, indexers, prefs);
-    const reqCtx = { hasTimedOut: false };
+  const reqCtx = { hasTimedOut: false };
     if (results._incomplete) reqCtx.hasTimedOut = true;
 
     const priorityLang = prefs.priorityLang ?? "pt-br";
@@ -238,7 +238,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
   console.log(`\n=========================================`);
   console.log(`NOVA BUSCA: [${type}] ${id}`);
 
-  const isDebridMode = !isStremThruMode && prefs.debrid && prefs.debridConfig &&
+  const isDebridMode = prefs.debrid && prefs.debridConfig &&
     (prefs.debridConfig.torboxKey || prefs.debridConfig.rdKey);
 
   if (isDebridMode) {
@@ -288,7 +288,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     streamWaiters.delete(streamCacheKey);
   };
   const _t0 = Date.now();
-  const reqCtx = { hasTimedOut: false };
+  const reqCtx = { hasTimedOut: false, stremthruMode: isStremThruMode };
 
   try {
     const { parsed, displayTitle, aliases = [], queries, episode, year, search } = await buildQueries(type, id);
@@ -455,19 +455,20 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       if (finalStreams.length > 0) {
         const ttl = reqCtx.hasTimedOut ? 5 : 10800;
         await rc.set(streamCacheKey, JSON.stringify(finalStreams), ttl).catch(() => {});
+        const finalShape = finalStreams.slice(0, 5).map(s => ({
+          name: String(s.name || "").replace(/\n/g, " | ").slice(0, 80),
+          url: !!s.url,
+          externalUrl: !!s.externalUrl,
+          infoHash: !!s.infoHash,
+        }));
+        console.log(`[STREMTHRU] Enviando ${finalStreams.length} streams totais`);
+        console.log(`[STREMTHRU] Shape: ${JSON.stringify(finalShape)}`);
+        releaseLock(finalStreams);
+        return res.json({ streams: finalStreams });
       }
-      const finalShape = finalStreams.slice(0, 5).map(s => ({
-        name: String(s.name || "").replace(/\n/g, " | ").slice(0, 80),
-        url: !!s.url,
-        externalUrl: !!s.externalUrl,
-        infoHash: !!s.infoHash,
-      }));
-      console.log(`[STREMTHRU] Enviando ${finalStreams.length} streams totais`);
-        console.log(`=========================================
-`);
-      releaseLock(finalStreams);
 
-      return res.json({ streams: finalStreams });
+      console.log(`[STREMTHRU] Wrap retornou 0 streams (${Date.now() - _stStart}ms) — fallback para busca direta via debrid`);
+      releaseLock([]);
     }
 
 
@@ -814,8 +815,9 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       return results;
     })()).filter(Boolean);
 
-    let rdCacheMap = {};
-    let tbCacheMap = {};
+      let rdCacheMap = {};
+      let tbCacheMap = {};
+      let stCacheMap = {};
 
     if (isDebridMode && !prefs.stConfig && withHashes.length > 0) {
       const _tDebrid = Date.now();
@@ -875,26 +877,45 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       console.log(`[STREMTHRU] Executando cache check nativo via API do StremThru...`);
       const _tDebrid = Date.now();
       const allHashesST = [...new Set(withHashes.map(r => String(r._resolved?.infoHash || "").toLowerCase()).filter(Boolean))];
-      const stCacheMap = {};
       const axios = require("axios");
 
-      // Faz todas as requisições em paralelo (sem agrupamento sequencial)
-      await Promise.all(prefs.stConfig.stores.flatMap(store =>
-        allHashesST.map(async hash => {
+      const stStore = prefs.stConfig.stores[0];
+      if (stStore) {
+        const stHeaders = { "X-StremThru-Store-Name": stStore.c, "X-StremThru-Store-Authorization": `Bearer ${stStore.t}` };
+        const stBase = prefs.stConfig.url.replace(/\/+$/, "");
+
+        // Passo 1: Busca status de cache de todos os hashes
+        await Promise.all(allHashesST.map(async hash => {
           try {
-            const checkRes = await axios.get(`${prefs.stConfig.url}/v0/store/magnets/check?magnet=${hash}`, {
-              headers: { "X-StremThru-Store-Name": store.c, "X-StremThru-Store-Authorization": `Bearer ${store.t}` },
-              validateStatus: () => true, timeout: 5000,
+            const checkRes = await axios.get(`${stBase}/v0/store/magnets/check?magnet=${hash}`, {
+              headers: stHeaders, validateStatus: () => true, timeout: 5000,
             });
             if (checkRes.status === 200 && checkRes.data?.data?.items) {
               const torrent = checkRes.data.data.items.find(t => t.hash?.toLowerCase() === hash);
               if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
-                stCacheMap[hash] = true;
+                stCacheMap[hash] = torrent;
               }
             }
           } catch {}
-        })
-      ));
+        }));
+
+        // Passo 2: Busca IDs via Torz list para hashes em cache que não têm id
+        const missingIds = Object.entries(stCacheMap).filter(([, v]) => !v?.id).map(([k]) => k);
+        if (missingIds.length) {
+          try {
+            const listRes = await axios.get(`${stBase}/v0/store/torz?limit=500`, {
+              headers: stHeaders, timeout: 10000, validateStatus: s => s < 400,
+            });
+            const items = listRes.data?.data?.items || [];
+            for (const item of items) {
+              const h = (item.hash || "").toLowerCase();
+              if (h && stCacheMap[h] && !stCacheMap[h].id && item.id) {
+                stCacheMap[h] = { ...stCacheMap[h], id: item.id, files: item.files || stCacheMap[h].files };
+              }
+            }
+          } catch {}
+        }
+      }
 
       let cachedCount = 0;
       for (const r of withHashes) {
@@ -1147,6 +1168,77 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             })).then(items => items.filter(Boolean));
           }
 
+          // ── Modo StremThru direto (sem debrid nativo) ──────────────────
+          if (!isDebridMode && prefs.stConfig && resolved.infoHash) {
+            const _addonName = prefs.addonName || "ProwJack";
+            const _stStore = prefs.stConfig.stores[0];
+            if (!_stStore) return null;
+            const _stAxios = require("axios");
+            const _stHeaders = { "X-StremThru-Store-Name": _stStore.c, "X-StremThru-Store-Authorization": `Bearer ${_stStore.t}` };
+            const _baseUrl = prefs.stConfig.url.replace(/\/+$/, "");
+
+            async function stResolveLink(torrentId, stFiles) {
+              if (!torrentId || !stFiles?.length) return null;
+              const pickIdx = matchedFile?.idx ?? 0;
+              const file = stFiles[pickIdx] || stFiles[0];
+              if (!file) return null;
+              if (file.link) return { link: file.link, name: file.name || file.filename, size: file.size };
+              try {
+                const lr = await _stAxios.get(`${_baseUrl}/v0/store/torz/${torrentId}`, {
+                  headers: _stHeaders, timeout: 10000, validateStatus: s => s < 400,
+                });
+                const freshFile = (lr.data?.data?.files || [])[pickIdx];
+                if (freshFile?.link) return { link: freshFile.link, name: freshFile.name, size: freshFile.size };
+              } catch {}
+              return null;
+            }
+
+            function stStreamObj(emoji, cached, link, fileName, fileSize) {
+              return {
+                name: `${_addonName}\n${emoji} ${resLabel || "Links"} [ST]`,
+                description: [descNoSeeds, fileName ? `📂 ${fileName}` : ""].filter(Boolean).join("\n"),
+                url: link,
+                _cached: cached, _sourceType: "debrid",
+                _priorityIndexer: !!r._priorityIndexer,
+                behaviorHints: {
+                  filename: fileName || displayFileName,
+                  videoSize: fileSize || displayFile?.size,
+                  bingeGroup: `prowjack|stremthru|${resolved.infoHash}`,
+                  notWebReady: false,
+                },
+              };
+            }
+
+            const cachedTorrent = stCacheMap[resolved.infoHash.toLowerCase()];
+            if (cachedTorrent && cachedTorrent.id) {
+              const resolved_link = await stResolveLink(cachedTorrent.id, cachedTorrent.files);
+              if (resolved_link) {
+                return stStreamObj("⚡️", true, resolved_link.link, resolved_link.name, resolved_link.size);
+              }
+            }
+
+            try {
+              const addRes = await _stAxios.post(`${_baseUrl}/v0/store/torz`,
+                { link: magnet },
+                { headers: _stHeaders, timeout: 15000, validateStatus: () => true }
+              );
+              if (addRes.status >= 200 && addRes.status < 300 && addRes.data?.data) {
+                const td = addRes.data.data;
+                const stStatus = td.status;
+                if (stStatus === "downloaded" || stStatus === "cached") {
+                  const resolved_link = await stResolveLink(td.id, td.files);
+                  if (resolved_link) {
+                    return stStreamObj("⚡️", true, resolved_link.link, resolved_link.name, resolved_link.size);
+                  }
+                }
+                return stStreamObj("⏳", false, `${_baseUrl}/v0/store/torz/${td.id}`, displayFileName, displayFile?.size);
+              }
+            } catch (err) {
+              console.log(`[STREMTHRU] Erro add magnet: ${err.message}`);
+            }
+            return null;
+          }
+
           // ── Modo P2P (sem debrid) ──────────────────────────────────────
           const shouldOfferQbit = shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCreds);
 
@@ -1355,10 +1447,10 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const dpi = _priorityIndexerRank(a) - _priorityIndexerRank(b); if (dpi !== 0) return dpi;
       const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
       const dk = _keywordRank(a) - _keywordRank(b); if (dk !== 0) return dk;
+      const ds = (b._originalScore || 0) - (a._originalScore || 0); if (ds !== 0) return ds;
       const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
       const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
       const dz = _sizeScore(b) - _sizeScore(a); if (dz !== 0) return dz;
-      const dsr = _sourceRank(a) - _sourceRank(b); if (dsr !== 0) return dsr;
       return (b._seeders || 0) - (a._seeders || 0);
     });
 
@@ -1456,6 +1548,10 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const cached = finalStreams.filter(s => s.externalUrl || (s.url && !s.url.includes('/debrid-add/'))).length;
       const queued = finalStreams.filter(s => s.url &&  s.url.includes('/debrid-add/')).length;
       console.log(`[DEBRID] Streams listados: ${cached} ⚡️ cached + ${queued} ⬇️ on-demand`);
+    } else if (isStremThruMode) {
+      const stCached = finalStreams.filter(s => (s.name || "").includes("⚡️")).length;
+      const stQueued = finalStreams.length - stCached;
+      console.log(`[STREMTHRU] Streams listados: ${stCached} ⚡️ cached + ${stQueued} ⏳ on-demand`);
     } else {
       console.log(`Magnets listados: Enviando ${finalStreams.length} torrents!`);
     }

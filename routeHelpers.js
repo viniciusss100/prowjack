@@ -19,6 +19,13 @@ const memoryStore = {
 
 function checkRateLimit(ip) {
   const now = Date.now();
+
+  if (rateLimitStore.size > 10000) {
+    for (const [key, entry] of rateLimitStore) {
+      if (entry.resetAt <= now) rateLimitStore.delete(key);
+    }
+  }
+
   const entry = rateLimitStore.get(ip);
   
   if (!entry) {
@@ -37,10 +44,18 @@ function checkRateLimit(ip) {
 }
 
 function getPublicBase(req) {
-  if (ENV.addonPublicUrl) return ENV.addonPublicUrl;
-  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+  if (ENV.addonPublicUrl) return ENV.addonPublicUrl.replace(/\/+$/, "");
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
   const host     = req.headers["x-forwarded-host"]  || req.get("host");
   return `${protocol}://${host}`;
+}
+
+// Garante que a URL usada como upstream interno no StremThru tenha protocolo
+// válido. Sem o "https://", o StremThru não conseguia alcançar o upstream e a
+// busca retornava vazio.
+function absolutePublicBase(req) {
+  const base = getPublicBase(req);
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(base) ? base : `https://${base}`;
 }
 
 function buildStremThruProxyManifestUrl(req, prefs, userConfig) {
@@ -48,7 +63,7 @@ function buildStremThruProxyManifestUrl(req, prefs, userConfig) {
     return null;
   }
   // Usa a rota interna como upstream — evita loop de StremThru chamando StremThru
-  const internalManifest = `${getPublicBase(req)}/internal/${userConfig}/manifest.json`;
+  const internalManifest = `${absolutePublicBase(req)}/internal/${userConfig}/manifest.json`;
   const storeCodeMap = { torbox: "tb", realdebrid: "rd", alldebrid: "ad", debridlink: "dl", premiumize: "pm", offcloud: "oc" };
   const wrapEncoded = Buffer.from(JSON.stringify({
     upstreams: [{ u: internalManifest }],

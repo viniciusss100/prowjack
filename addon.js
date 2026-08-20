@@ -37,6 +37,14 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "0");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
+
 app.use("/", require("./routes/api"));
 app.use("/", require("./routes/manifest"));
 app.use("/", require("./routes/configure"));
@@ -46,7 +54,7 @@ app.use("/", require("./routes/stream"));
 
 app.listen(ENV.port, "0.0.0.0", () => {
   console.log(`===== Application Startup at ${new Date().toISOString().replace('T', ' ').slice(0, 19)} =====`);
-  console.log(`ProwJack v3.2.3 -> http://localhost:${ENV.port}/configure`);
+  console.log(`ProwJack v3.3.0 -> http://localhost:${ENV.port}/configure`);
   console.log(`   Jackett : ${ENV.jackettUrl}`);
   console.log(`   Redis   : ${ENV.redisUrl}`);
   console.log(`   qBittorrent: ${isQbitConfigured() ? "ativo" : "desativado"}`);

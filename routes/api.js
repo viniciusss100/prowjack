@@ -48,7 +48,7 @@ const {
   markTorrentDownloadFailed, infoHashQueueKey, InfoHashQueue, infoHashQueue, resolveInfoHash
 } = require("../torrentUtils");
 const {
-  jackettFetchIndexers, fetchIndexerPrivacyMap, jackettSearch, buildQueries, resolveSearchIndexers
+  jackettFetchIndexers, fetchIndexerPrivacyMap, jackettSearch, buildQueries, resolveSearchIndexers, isProwlarrServer
 } = require("../jackettSearch");
 const {
   getPreferredRssIndexers, loadRssItemsForType, rssCatalogMetaId, getRssItemToken,
@@ -125,9 +125,14 @@ router.get("/api/env", async (_, res) => {
       redisOk = true;
     }
   } catch {}
+  const jUrl = ENV.jackettUrl;
+  const jKey = ENV.apiKey;
+  const isProwlarr = isProwlarrServer(jUrl, jKey);
   res.json({
     jackettConfigured: !!ENV.jackettUrl,
     jackettKeyConfigured: !!ENV.apiKey,
+    isProwlarr: isProwlarr === true,
+    serverType: isProwlarr === true ? "prowlarr" : isProwlarr === false ? "jackett" : "unknown",
     qbitConfigured: isQbitConfigured(),
     redisOk,
     port: ENV.port,

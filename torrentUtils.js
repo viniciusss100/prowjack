@@ -387,13 +387,14 @@ async function resolveInfoHash(r, reqCtx = {}) {
       return await downloadPromise;
     }
 
-    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("TIMEOUT"), 6000));
+    const timeoutMs = reqCtx.stremthruMode ? 14000 : 6000;
+    const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("TIMEOUT"), timeoutMs));
     const result = await Promise.race([downloadPromise, timeoutPromise]);
     
     if (result === "TIMEOUT") {
       const indexerMatch = httpLink.match(/https?:\/\/[^\/]+\/([^\/]+)\/download/);
       const idxId = indexerMatch ? `Indexador ${indexerMatch[1]}` : httpLink.slice(0,50)+'...';
-      console.warn(`[WARN] Timeout 6s atingido em resolveInfoHash para ${idxId} (Download continua em background)`);
+      console.warn(`[WARN] Timeout ${Math.round(timeoutMs/1000)}s atingido em resolveInfoHash para ${idxId} (Download continua em background)`);
       reqCtx.hasTimedOut = true;
       return magnetHash ? { infoHash: magnetHash, files: null, buffer: null, isPrivate: false } : null;
     }

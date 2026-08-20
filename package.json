@@ -1,6 +1,6 @@
 {
   "name": "prowjack",
-  "version": "3.2.4",
+  "version": "3.3.0",
   "description": "Qbittorrent+Prowlarr/Jackett+Debrid",
   "main": "addon.js",
   "scripts": {

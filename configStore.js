@@ -41,7 +41,7 @@ function buildConfigPgOptions(rawUrl) {
 
   const isRemote = /^postgres/i.test(rawUrl) && !/^(localhost|127\.0\.0\.1|::1)$/i.test(hostname);
   const ssl = isRemote && sslMode !== "disable"
-    ? { rejectUnauthorized: false }
+    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
     : undefined;
   return { connectionString, ssl };
 }

@@ -1,11 +1,23 @@
 require("dotenv").config();
 
+// Garante que uma URL pública sempre tenha protocolo. Um ADDON_PUBLIC_URL sem
+// esquema (ex.: "prowjack.example.com") quebrava o buildStremThruProxyManifestUrl,
+// gerando um upstream sem "https://" que o StremThru não conseguia buscar → buscas
+// falhavam quando o StremThru era selecionado como debrid.
+function normalizePublicUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const noSlash = raw.replace(/^\/+/, "");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(noSlash)) return noSlash.replace(/\/+$/, "");
+  return `https://${noSlash.replace(/\/+$/, "")}`;
+}
+
 const ENV = {
   jackettUrl:      (process.env.JACKETT_URL || "http://localhost:9117").replace(/\/+$/, ""),
   apiKey:          (process.env.JACKETT_API_KEY || "").trim(),
   redisUrl:        (process.env.REDIS_URL || "redis://127.0.0.1:6379").trim(),
   port:            parseInt(process.env.PORT || "7014", 10),
-  addonPublicUrl:  (process.env.ADDON_PUBLIC_URL || "").trim().replace(/\/+$/, ""),
+  addonPublicUrl:  normalizePublicUrl(process.env.ADDON_PUBLIC_URL || ""),
   accessToken:     (process.env.ACCESS_TOKEN || "").trim(),
   scrapManifests:  (process.env.SCRAP_MANIFEST_URLS || "").split(",").map(s => s.trim()).filter(Boolean),
   stremThruUrl:    (process.env.STREMTHRU_URL || "").trim().replace(/\/+$/, ""),

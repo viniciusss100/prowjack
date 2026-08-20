@@ -3,6 +3,7 @@
 *.pem
 *.key
 *.crt
+compose.yml
 
 # Dependências
 node_modules/

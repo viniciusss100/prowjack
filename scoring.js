@@ -168,6 +168,24 @@ function relaxedTitleMatchScore(title, aliases = []) {
   return best;
 }
 
+/**
+ * Fração de tokens do título alvo presentes no título do resultado.
+ * Ex.: "The Shawshank Redemption 1994" vs "The Shawshank Redemption 1994 1080p"
+ * → cobre os tokens relevantes do alvo.
+ */
+function normalizedTokenOverlap(title, aliases = []) {
+  const titleSet = new Set(normalizeTitleTokens(title));
+  if (!titleSet.size) return 0;
+  let best = 0;
+  for (const alias of aliases.filter(Boolean)) {
+    const aliasTokens = normalizeTitleTokens(alias);
+    if (!aliasTokens.length) continue;
+    const matched = aliasTokens.filter(tok => titleSet.has(tok)).length;
+    best = Math.max(best, matched / aliasTokens.length);
+  }
+  return best;
+}
+
 function extractReleaseYear(text) {
   const m = String(text || "").match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
   return m ? parseInt(m[1], 10) : null;
@@ -237,7 +255,7 @@ function episodeMatchRank(title, season, episode) {
     return 1;
   }
   if (hasAnyEpisodeMarker(t)) return 0;
-  return 0;
+  return 1;
 }
 
 function animeEpisodeMatchRank(title, ep) {
@@ -413,15 +431,25 @@ function visibleSeedCount(result) {
   return Number.isFinite(Number(n)) ? Number(n) : 0;
 }
 
+const REDOS_SUSPICIOUS = /(\([^)]*[+*][^)]*\))[+*]|\(\?:[^)]*[+*][^)]*\)[+*]|\(\?=[^)]*[+*][^)]*\)[+*]|\(\?![^)]*[+*][^)]*\)[+*]/;
+
 function matchesKeywordBoost(title, boostFilter) {
   if (!boostFilter || !boostFilter.trim()) return false;
   const pattern = boostFilter.trim();
   if (pattern.length > 500) return false;
+  if (REDOS_SUSPICIOUS.test(pattern)) {
+    console.warn(`[SECURITY] ReDoS-suspeito bloqueado: ${pattern.slice(0, 80)}`);
+    return false;
+  }
   try {
     const regex = new RegExp(pattern, "i");
-    const start = Date.now();
-    const result = regex.test(String(title || "").slice(0, 500));
-    if (Date.now() - start > 100) { console.warn(`[SECURITY] Regex timeout: ${pattern}`); return false; }
+    const input = String(title || "").slice(0, 300);
+    let result = false;
+    try {
+      result = regex.test(input);
+    } catch {
+      return false;
+    }
     return result;
   } catch { return false; }
 }
@@ -441,6 +469,10 @@ function textHasAnyTerm(text, terms) {
     if (/^\d+$/.test(term)) return new RegExp(`(?:^|\\s)${term}(?:\\s|$)`).test(hay);
     return hay.includes(term);
   });
+}
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function resultIndexerText(r, indexerName = "") {
@@ -544,7 +576,7 @@ module.exports = {
   first, matchAll, uniq, normTitle,
   getLangs, score,
   normalizeTitleTokens, escapedWordRegex,
-  titleMatchScore, relaxedTitleMatchScore,
+  titleMatchScore, relaxedTitleMatchScore, normalizedTokenOverlap,
   extractReleaseYear, normalizeImdbId, getResultImdbId,
   looksLikeEpisodeRelease, isCompletePack,
   parseEpisodeRanges, hasAnyEpisodeMarker,

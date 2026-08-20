@@ -4,17 +4,17 @@ services:
     container_name: prowjack
     restart: unless-stopped
     network_mode: "service:protonvpn"
-#    networks:
-#      - npm-net
-#    ports:
-#      - "7014:7014"
+ #   networks:
+ #     - no_vpn
+ #   ports:
+ #     - "7014:7014"
     env_file:
       - ./.env
     environment:
       - PORT=7014
-      - ADDON_PUBLIC_URL=
+      - ADDON_PUBLIC_URL=https://prowjack.004123.xyz
     volumes:
-      - /media/vinicius/Arquivos:/data             # ← compartilhado com qBittorrent
+      - /run/media/vinicius/L/torrents:/data             # ← compartilhado com qBittorrent
 
 
 

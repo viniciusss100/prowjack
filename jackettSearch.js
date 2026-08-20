@@ -8,7 +8,9 @@ const {
   normalizeImdbId, 
   extractReleaseYear, 
   dedupeResults,
-  animeEpisodeMatches
+  animeEpisodeMatches,
+  titleMatchScore,
+  normalizedTokenOverlap
 } = require("./scoring");
 
 const ENV = {
@@ -18,9 +20,42 @@ const ENV = {
 
 const CACHE_VERSION = 5;
 
+// Server type detection cache: "jackett" | "prowlarr" | null (unknown)
+// Keyed by `${url}:${key}` to support different instances.
+const _serverTypeCache = new Map();
+const SERVER_TYPE_TTL = 600_000; // 10 min
+
+function _serverTypeKey(url, key) { return `${url}:${key}`; }
+
+function isProwlarrServer(url, key) {
+  const k = _serverTypeKey(url, key);
+  const entry = _serverTypeCache.get(k);
+  if (entry && Date.now() - entry.ts < SERVER_TYPE_TTL) return entry.type === "prowlarr";
+  return null; // unknown
+}
+
+function _setServerType(url, key, type) {
+  _serverTypeCache.set(_serverTypeKey(url, key), { type, ts: Date.now() });
+}
+
 async function jackettFetchIndexers(url, key) {
   const jUrl = (url || ENV.jackettUrl).replace(/\/+$/, "");
   const jKey = key || ENV.apiKey;
+
+  // If we already know this is Prowlarr, skip the Jackett Torznab attempt
+  if (isProwlarrServer(jUrl, jKey) !== false) {
+    try {
+      const res = await axios.get(`${jUrl}/api/v1/indexer`, {
+        params: { apikey: jKey }, timeout: 8000, validateStatus: () => true,
+      });
+      if (res.status < 400 && Array.isArray(res.data)) {
+        _setServerType(jUrl, jKey, "prowlarr");
+        return res.data.map(ix => ({ id: String(ix.id || "").trim(), name: String(ix.name || "").trim() })).filter(ix => ix.id);
+      }
+    } catch {}
+  }
+
+  // Try Jackett Torznab API (or if we already know it's Jackett)
   try {
     const params = { t: "indexers", configured: "true" };
     if (jKey) params.apikey = jKey;
@@ -37,18 +72,25 @@ async function jackettFetchIndexers(url, key) {
         const name = titleMatch ? decodeXmlEntities(titleMatch[1].trim()) : id;
         indexers.push({ id, name });
       }
-      if (indexers.length) return indexers;
+      if (indexers.length) {
+        _setServerType(jUrl, jKey, "jackett");
+        return indexers;
+      }
     }
   } catch {}
-  // Fallback Prowlarr
-  try {
-    const res = await axios.get(`${jUrl}/api/v1/indexer`, {
-      params: { apikey: jKey }, timeout: 8000, validateStatus: () => true,
-    });
-    if (res.status < 400 && Array.isArray(res.data)) {
-      return res.data.map(ix => ({ id: String(ix.id || "").trim(), name: String(ix.name || "").trim() })).filter(ix => ix.id);
-    }
-  } catch {}
+
+  // Fallback: try Prowlarr API if Jackett failed
+  if (isProwlarrServer(jUrl, jKey) === false) {
+    try {
+      const res = await axios.get(`${jUrl}/api/v1/indexer`, {
+        params: { apikey: jKey }, timeout: 8000, validateStatus: () => true,
+      });
+      if (res.status < 400 && Array.isArray(res.data)) {
+        _setServerType(jUrl, jKey, "prowlarr");
+        return res.data.map(ix => ({ id: String(ix.id || "").trim(), name: String(ix.name || "").trim() })).filter(ix => ix.id);
+      }
+    } catch {}
+  }
   return [];
 }
 
@@ -192,13 +234,21 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
 }
 
 async function jackettTextSearch(query, indexer, timeout, jUrl, jKey) {
+  // If server is Prowlarr, go directly to Prowlarr search
+  if (isProwlarrServer(jUrl, jKey) !== false) {
+    return prowlarrSearch(query, indexer, 50, jUrl, jKey, timeout);
+  }
   const params = { Query: query, Category: [2000, 5000] };
   if (jKey) params.apikey = jKey;
   const res = await axios.get(
     `${jUrl}/api/v2.0/indexers/${indexer}/results`,
     { params, timeout, validateStatus: () => true }
   );
-  if (res.status === 404 || res.status === 401) return prowlarrSearch(query, indexer, 50, jUrl, jKey, timeout);
+  if (res.status === 404 || res.status === 401) {
+    _setServerType(jUrl, jKey, "prowlarr");
+    return prowlarrSearch(query, indexer, 50, jUrl, jKey, timeout);
+  }
+  _setServerType(jUrl, jKey, "jackett");
   if (res.status === 429) throw Object.assign(new Error("Rate limited"), { response: res });
   if (res.status >= 400)  throw new Error(`HTTP ${res.status}`);
   return (res.data?.Results || []).map(r => ({ ...r, _structuredMatch: false }));
@@ -206,6 +256,10 @@ async function jackettTextSearch(query, indexer, timeout, jUrl, jKey) {
 
 async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
   if (!search?.mode || !search?.imdbId) return [];
+  // If server is Prowlarr, go directly to Prowlarr structured search
+  if (isProwlarrServer(jUrl, jKey) !== false) {
+    return prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout);
+  }
   const params = { apikey: jKey, t: search.mode, imdbid: search.imdbId, q: search.title, cat: search.mode === "movie" ? "2000" : "5000" };
   if (search.year)    params.year   = search.year;
   if (search.season  != null) params.season = search.season;
@@ -215,7 +269,11 @@ async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
     `${jUrl}/api/v2.0/indexers/${indexer}/results/torznab/api`,
     { params, timeout, responseType: "text", validateStatus: () => true }
   );
-  if (res.status === 404) return [];
+  if (res.status === 404) {
+    _setServerType(jUrl, jKey, "prowlarr");
+    return [];
+  }
+  _setServerType(jUrl, jKey, "jackett");
   if (res.status === 429) throw Object.assign(new Error("Rate limited"), { response: res });
   if (res.status >= 400)  throw new Error(`HTTP ${res.status}`);
   return parseTorznabResults(String(res.data || ""), indexer);
@@ -241,10 +299,11 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
   if (!searchPromise) {
     searchPromise = (async () => {
       const t0 = Date.now();
-      const isProwlarr = /^\d+$/.test(String(indexer));
       try {
         let results = [];
-        if (!isProwlarr && plan.search && !plan.parsed?.isAnime) {
+        // Structured search (IMDB/season/episode) — jackettStructuredSearch and
+        // prowlarrStructuredSearch are now routed internally by server type detection.
+        if (plan.search && !plan.parsed?.isAnime) {
           try {
             results = await jackettStructuredSearch(plan.search, indexer, timeout, jUrl, jKey);
           } catch (err) {
@@ -252,22 +311,22 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
             if (err.response?.status === 429) throw err;
           }
         }
-        if (results.length === 0 && isProwlarr && plan.search && !plan.parsed?.isAnime) {
-          try {
-            results = await prowlarrStructuredSearch(plan.search, indexer, jUrl, jKey, timeout);
-          } catch (err) {
-            console.log(`  ${indexer}: erro na busca estruturada Prowlarr: ${err.message}`);
-            if (err.response?.status === 429) throw err;
-          }
-        }
-        if (results.length === 0) {
+        const hasCorrectEpisode = plan.parsed?.season != null && plan.parsed?.episode != null
+          ? results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))
+          : results.length > 0;
+        // Não descartamos resultados estruturados válidos. Se algum já contém o
+        // episódio alvo, os usamos; caso contrário, complementamos com a busca
+        // por texto (targeted "Título SxxExx") — que costuma achar o episódio.
+        // Assim evitamos devolver vazio (Issue StremThru) e evitamos re-introduzir
+        // resultados errados de episódios diferentes (Issue correção de busca).
+        if (results.length === 0 || !hasCorrectEpisode) {
+          const wantEpisode = plan.parsed?.season != null && plan.parsed?.episode != null;
           for (const query of plan.queries) {
             try {
-              const textResults = isProwlarr
-                ? await prowlarrSearch(query, indexer, 50, jUrl, jKey, timeout)
-                : await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
+              const textResults = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
               results.push(...textResults);
-              if (results.length > 0) break;
+              if (!wantEpisode) break;
+              if (results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))) break;
             } catch (err) {
               console.log(`  ${indexer}: erro na busca por texto "${query}": ${err.message}`);
               if (err.response?.status === 429) throw err;
@@ -326,17 +385,30 @@ async function trackMetrics(indexer, ms, count, ok) {
  * @returns {boolean} true se o título é compatível com a busca
  */
 function titleMatchesEpisode(title, targetSeason, targetEpisode) {
-  // Formato SxxExx com range opcional e limite de dígitos (evita S01E012 → S01E01)
-  const SxEx = /S(\d{1,2})E(\d{1,2})(?:[-E](\d{1,2}))?(?!\d)/gi;
+  // Formato SxxExx com range opcional (S01E01-E08 ou S01E01E08) e limite de
+  // dígitos (evita S01E012 → S01E01)
+  const SxEx = /S(\d{1,2})E(\d{1,2})(?:-(?:E)?(\d{1,2})|E(\d{1,2}))?(?!\d)/gi;
   // Formato clássico NxNN (ex: 1x01) — dígitos 1–2 antes do "x"
   const NxNN = /\b(\d{1,2})x(\d{2})\b/gi;
+  // Marcador só de temporada: Sxx (sem E), Season N, Temporada N
+  const SeasonOnly = /\bS(0*\d{1,2})(?!E\d)\b|\bseason\s*0*(\d{1,2})\b|\btemporada\s*0*(\d{1,2})\b/gi;
 
   // Detecta se há QUALQUER padrão de episódio no título (inclusive formatos incomuns como S01E012)
-  // Isto distingue season packs (sem marcador) de episódios com numeração estranha
   const hasSomeEpMarker = /S\d+E\d+|\b\d{1,2}x\d{2}\b/i.test(title);
 
-  // Sem nenhum marcador de episódio → provavelmente pack de temporada → mantém
-  if (!hasSomeEpMarker) return true;
+  // Sem nenhum marcador de episódio:
+  if (!hasSomeEpMarker) {
+    // Se houver marcador "só de temporada" apontando para OUTRA temporada, rejeita.
+    // Ex.: pedido S01E03, título "Show S03" (pack) → temporada errada.
+    for (const m of [...title.matchAll(SeasonOnly)]) {
+      const sRaw = parseInt(m[1] || m[2] || m[3], 10);
+      if (Number.isFinite(sRaw) && sRaw !== targetSeason) {
+        return false;
+      }
+    }
+    // Pack de temporada correta ou título sem temporada → mantém (pode conter o ep)
+    return true;
+  }
 
   const matchesSxEx = [...title.matchAll(SxEx)];
   const matchesNxNN = [...title.matchAll(NxNN)];
@@ -345,7 +417,7 @@ function titleMatchesEpisode(title, targetSeason, targetEpisode) {
   for (const m of matchesSxEx) {
     const mSeason  = parseInt(m[1], 10);
     const mEpStart = parseInt(m[2], 10);
-    const mEpEnd   = m[3] ? parseInt(m[3], 10) : mEpStart;
+    const mEpEnd   = m[3] ? parseInt(m[3], 10) : (m[4] ? parseInt(m[4], 10) : mEpStart);
     if (mSeason === targetSeason && targetEpisode >= mEpStart && targetEpisode <= mEpEnd) {
       return true;
     }
@@ -361,20 +433,61 @@ function titleMatchesEpisode(title, targetSeason, targetEpisode) {
   return false;
 }
 
-function filterBadMatches(results, parsed) {
+function filterBadMatches(results, parsed, plan) {
   if (!parsed || (parsed.season == null && parsed.episode == null && parsed.type !== "movie")) return results;
+
+  // Títulos/aliases alvo para verificação de correspondência de conteúdo.
+  // `queries` são as variações de título usadas na busca textual.
+  const aliases = uniq([
+    ...(plan?.queries || []).map(q => {
+      // Remove sufixos de temporada/episódio usados na query textual para
+      // obter o título puro (ex.: "Show S01E02" → "Show").
+      const clean = String(q || "").replace(/S\d{2}E\d{2}(-\d{2})?|S\d{2}$|\b\d{1,2}x\d{2}\b/gi, "").trim();
+      return clean || q;
+    }),
+  ]);
+
   return results.filter(r => {
     if (!r.Title) return false;
+    const title = r.Title;
+    const targetSeason = parsed.season;
+    const targetEpisode = parsed.episode;
 
-    if (parsed.type === "series" && parsed.season != null && parsed.episode != null) {
+    // ── Séries / Animes ──
+    if (parsed.type === "series" && targetSeason != null && targetEpisode != null) {
       if (!parsed.isAnime) {
-        if (!titleMatchesEpisode(r.Title, parsed.season, parsed.episode)) {
-          console.log(`[Filtro] Removido episódio diferente (T${parsed.season}E${parsed.episode}): ${r.Title}`);
+        if (!titleMatchesEpisode(title, targetSeason, targetEpisode)) {
+          console.log(`[Filtro] Removido episódio diferente (T${targetSeason}E${targetEpisode}): ${title}`);
           return false;
         }
       } else {
-        if (!animeEpisodeMatches(r.Title, parsed.episode)) {
-          console.log(`[Filtro] Removido falso positivo Anime (E${parsed.episode}): ${r.Title}`);
+        if (!animeEpisodeMatches(title, targetEpisode)) {
+          console.log(`[Filtro] Removido falso positivo Anime (E${targetEpisode}): ${title}`);
+          return false;
+        }
+      }
+
+      // Um título de filme / outro formato sem nenhum marcador de episódio pode
+      // passar como "season pack". Para evitar resultados sem correspondência,
+      // exigimos alguma menção ao título quando não há marcador de episódio.
+      if (aliases.length && normTitle(aliases[0]).length >= 4) {
+        const overlap = normalizedTokenOverlap(title, aliases);
+        if (overlap < 0.4) {
+          console.log(`[Filtro] Removido sem correspondência de título (overlap=${overlap.toFixed(2)}): ${title}`);
+          return false;
+        }
+      }
+    }
+
+    // ── Filmes ──
+    if (parsed.type === "movie") {
+      if (aliases.length && normTitle(aliases[0]).length >= 4) {
+        const overlap = normalizedTokenOverlap(title, aliases);
+        const score = titleMatchScore(title, aliases);
+        // Sem overlap de tokens relevantes ou sem correspondência de título
+        // relevante → resultado errado (ex.: outro filme com o mesmo termo parcial).
+        if (overlap < 0.34 && score < 0.5) {
+          console.log(`[Filtro] Removido filme sem correspondência (overlap=${overlap.toFixed(2)}, score=${score.toFixed(2)}): ${title}`);
           return false;
         }
       }
@@ -477,7 +590,7 @@ async function jackettSearch(plan, indexers, prefs) {
   }
 
   fastPhaseActive = false;
-  const fastFlat    = filterBadMatches([...resultsByIndexer.values()].flat(), plan?.parsed);
+  const fastFlat    = filterBadMatches([...resultsByIndexer.values()].flat(), plan?.parsed, plan);
   const fastDeduped = prefs.dedupe !== false ? dedupeResults(fastFlat) : fastFlat;
   if (resultsByIndexer.size < indexers.length) {
     fastDeduped._incomplete = true;
@@ -490,7 +603,7 @@ async function jackettSearch(plan, indexers, prefs) {
 
   Promise.all(searchPromises).then(async (allResults) => {
     try {
-      const slowFlat    = filterBadMatches(allResults.flat(), plan?.parsed);
+      const slowFlat    = filterBadMatches(allResults.flat(), plan?.parsed, plan);
       const slowDeduped = prefs.dedupe !== false ? dedupeResults(slowFlat) : slowFlat;
       const t2 = Date.now();
       if (slowDeduped.length > fastDeduped.length) {
@@ -717,5 +830,6 @@ module.exports = { parseStreamId,
   fetchIndexerPrivacyMap,
   jackettSearch,
   buildQueries,
-  resolveSearchIndexers
+  resolveSearchIndexers,
+  isProwlarrServer,
 };
