@@ -90,7 +90,10 @@ async function ensureConfigDb(configDbUrl, configDbTable) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `).catch((err) => {
+    `).then(async () => {
+      // Migra configs antigas de arquivo para o Postgres (best-effort).
+      try { await migrateConfigFileToDb(pool, configDbTable); } catch {}
+    }).catch((err) => {
       configPgInit = null;
       console.error(`[CFG] Falha ao inicializar a tabela Postgres '${configDbTable}':`, err?.message || err);
       throw err;
@@ -122,6 +125,32 @@ async function cfgDbSave(id, prefs, configDbUrl, configDbTable) {
     [id, JSON.stringify(prefs)]
   );
   return true;
+}
+
+// Migra configs salvas em ARQUIVO (de quando o banco ainda não estava ativo)
+// para o Postgres, evitando que se percam em redeploys do Vercel (stateless).
+async function migrateConfigFileToDb(pool, configDbTable) {
+  const store = cfgStore();
+  const ids = Object.keys(store);
+  if (!ids.length) return;
+  let migrated = 0;
+  for (const id of ids) {
+    try {
+      const raw = store[id];
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed) continue;
+      const exists = (await pool.query(`SELECT 1 FROM ${configDbTable} WHERE id = $1`, [id])).rowCount > 0;
+      if (!exists) {
+        await pool.query(
+          `INSERT INTO ${configDbTable} (id, payload, created_at, updated_at)
+           VALUES ($1, $2::jsonb, NOW(), NOW())`,
+          [id, JSON.stringify(parsed)]
+        );
+        migrated++;
+      }
+    } catch {}
+  }
+  if (migrated) console.log(`[CFG] Migradas ${migrated} config(s) do arquivo para o Postgres.`);
 }
 
 // ─── File-based store ────────────────────────────────────────────────────────
