@@ -43,15 +43,22 @@ function buildConfigPgOptions(rawUrl) {
   } catch {}
 
   const isRemote = /^postgres/i.test(rawUrl) && !/^(localhost|127\.0\.0\.1|::1)$/i.test(hostname);
+  const isSupabasePooler = /pooler\.supabase\.com|supabase\.co/i.test(hostname);
   // Supabase (pooler) em runtime serverless (Vercel/Functions) exige SSL, mas o
   // bundle de CA do runtime nem sempre contém o certificado → rejectUnauthorized:true
   // dispara "self-signed certificate"/"unable to verify". Por padrão conectamos com
-  // rejectUnauthorized:false quando o SSL é exigido (sslmode=require), a menos que o
-  // operador force validação real via DB_SSL_REJECT_UNAUTHORIZED=true.
+  // rejectUnauthorized:false quando o SSL é exigido, a menos que o operador force
+  // validação real via DB_SSL_REJECT_UNAUTHORIZED=true.
   let ssl = undefined;
   if (isRemote && sslMode && sslMode !== "disable") {
     const reject = process.env.DB_SSL_REJECT_UNAUTHORIZED;
-    ssl = reject === "true" ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
+    const validate = reject === "true";
+    ssl = validate ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
+  } else if (isRemote && isSupabasePooler) {
+    // Segurança extra: evita que o pg infira SSL de outra forma e falhe no pooler.
+    ssl = process.env.DB_SSL_REJECT_UNAUTHORIZED === "true"
+      ? { rejectUnauthorized: true }
+      : { rejectUnauthorized: false };
   }
   return { connectionString, ssl };
 }
@@ -66,7 +73,11 @@ function getConfigPgPool(configDbUrl) {
   } catch (err) {
     throw new Error("CONFIG_DATABASE_URL/POSTGRES_URL configurado, mas a dependência 'pg' não está instalada. Rode npm install.");
   }
-  configPgPool = new Pool(buildConfigPgOptions(configDbUrl));
+  const opts = buildConfigPgOptions(configDbUrl);
+  let hostname = "";
+  try { hostname = new URL(opts.connectionString).hostname; } catch {}
+  console.log(`[CFG] Postgres inicializado (host=${hostname || '?'}, ssl=${opts.ssl ? JSON.stringify(opts.ssl) : 'off'})`);
+  configPgPool = new Pool(opts);
   return configPgPool;
 }
 
