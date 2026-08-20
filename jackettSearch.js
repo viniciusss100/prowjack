@@ -298,6 +298,62 @@ async function isRateLimited(indexer) {
   return !!(await rc.get(`rl:${indexer}`));
 }
 
+// Gera variações sanitizadas de uma query de anime para contornar indexers que
+// devolvem HTTP 400 com caracteres especiais (":" , "-", japonês, sufixos de
+// temporada como "4th season"). Exemplo:
+//   "Re:ゼロから始める異世界生活 4th season"
+//   → "Re ゼロから始める異世界生活 4th season"
+//   → "Rezero kara Hajimeru Isekai Seikatsu 4th season"
+//   → "Re ゼロから始める異世界生活"
+//   → "Rezero kara Hajimeru Isekai Seikatsu"
+function buildAnimeQueryFallsback(query) {
+  const out = [];
+  const q = String(query || "").trim();
+  if (!q) return out;
+
+  // 1) Remove caracteres que quebram a URL/query (":" para " ");
+  let noColon = q.replace(/[:]/g, " ");
+  noColon = noColon.replace(/\s+/g, " ").trim();
+  if (noColon && noColon !== q) out.push(noColon);
+
+  // 2) Remove sufixos de temporada ("4th season", "Season 4", "セカンドシーズン",
+  //    "S2", etc.), mantendo o título raiz.
+  const SEASON_SUFFIX = /\b\d+(?:th|st|nd|rd)?\s*season\b|\bseason\s*\d+\b|\bseason\s*\d+(?:th|st|nd|rd)?\b|\bs\d{1,2}\b/i;
+  const withoutSeason = (s) => s
+    .replace(SEASON_SUFFIX, "")
+    .replace(/[–—-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const noSeason = withoutSeason(q);
+  if (noSeason && noSeason !== q) out.push(noSeason);
+
+  // 3) Também remove ":" e sufixo de temporada juntos;
+  let noColonSeason = noColon;
+  if (noColonSeason !== q) {
+    noColonSeason = withoutSeason(noColonSeason);
+    if (noColonSeason && noColonSeason !== noColon && !out.includes(noColonSeason)) out.push(noColonSeason);
+  }
+
+  // 4) Se houver japonês na query, gera uma variante transliterada (retira os
+  //    kanji/kana) para indexers que só aceitam ASCII.
+  const hasJapanese = /[\u3000-\u30ff\u3040-\u309f\u4e00-\u9faf]/.test(q);
+  if (hasJapanese) {
+    const ascii = q
+      .replace(/[\u3000-\u30ff\u3040-\u309f\u4e00-\u9faf]+/g, " ")
+      .replace(/\s+/g, " ").trim();
+    if (ascii) out.push(ascii);
+    if (out.length) {
+      const asciiNoseason = out[0].replace(/[\u3000-\u30ff\u3040-\u309f\u4e00-\u9faf]+/g, " ").replace(/\s+/g, " ").trim();
+      if (asciiNoseason && !out.includes(asciiNoseason)) out.push(asciiNoseason);
+    }
+  }
+
+  return [...new Set(out)]
+    .filter(s => s && s.length >= 2)
+    .filter((s, i, arr) => s.length >= 4 || i === 0)
+    .slice(0, 4);
+}
+
 async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl, jKey) {
   if (await isRateLimited(indexer)) return [];
   
@@ -338,14 +394,18 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
         // indexers de anime, ainda sem ID padronizado em Torznab.
         if (plan.parsed?.isAnime && (results.length === 0 || !hasCorrectEpisode)) {
           for (const query of plan.queries) {
-            try {
-              const textResults = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
-              results.push(...textResults);
-              if (results.some(r => animeEpisodeMatches(r.Title || "", plan.parsed.episode))) break;
-            } catch (err) {
-              console.log(`  ${indexer}: erro na busca por metadado "${query}": ${err.message}`);
-              if (err.response?.status === 429) throw err;
+            const attempts = [query, ...buildAnimeQueryFallsback(query)];
+            for (const attempt of attempts) {
+              try {
+                const textResults = await jackettTextSearch(attempt, indexer, timeout, jUrl, jKey);
+                results.push(...textResults);
+                break;
+              } catch (err) {
+                if (err.response?.status === 429) throw err;
+                // continua para a próxima variação sanitizada da query
+              }
             }
+            if (results.some(r => animeEpisodeMatches(r.Title || "", plan.parsed.episode))) break;
           }
         }
         const ms   = Date.now() - t0;
