@@ -223,9 +223,10 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
     offset: 0,
     categories: search.mode === "movie" ? [2000] : [5000],
   };
-  if (search.imdbId) params.imdbId = search.imdbId.replace(/^tt/i, "");
-  if (search.tmdbId) params.tmdbId = search.tmdbId;
-  if (search.tvdbId) params.tvdbId = search.tvdbId;
+  // Envia APENAS UM ID de metadado por chamada (ver jackettStructuredSearch).
+  if (search.imdbId)        params.imdbId = search.imdbId.replace(/^tt/i, "");
+  else if (search.tmdbId)   params.tmdbId = search.tmdbId;
+  else if (search.tvdbId)   params.tvdbId = search.tvdbId;
   if (search.season  != null) params.season  = search.season;
   if (search.episode != null) params.episode = search.episode;
   const res = await axios.get(`${jUrl}/api/v1/search`, {
@@ -265,9 +266,12 @@ async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
     return prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout);
   }
   const params = { apikey: jKey, t: search.mode, q: search.title, cat: search.mode === "movie" ? "2000" : "5000" };
-  if (search.imdbId)    params.imdbid  = search.imdbId.replace(/^tt/i, "");
-  if (search.tmdbId)    params.tmdbid  = search.tmdbId;
-  if (search.tvdbId)    params.tvdbid  = search.tvdbId;
+  // Envia APENAS UM ID de metadado por chamada. Mandar vários de uma vez faz
+  // alguns indexers ignorarem season/ep e retornarem a série inteira (todas as
+  // temporadas), gerando falsos positivos na filtragem por episódio.
+  if (search.imdbId)        params.imdbid = search.imdbId.replace(/^tt/i, "");
+  else if (search.tmdbId)   params.tmdbid = search.tmdbId;
+  else if (search.tvdbId)   params.tvdbid = search.tvdbId;
   if (search.year)    params.year   = search.year;
   if (search.season  != null) params.season = search.season;
   if (search.episode != null) params.ep     = search.episode;
@@ -376,7 +380,9 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
           ].filter(Boolean);
           for (const v of metaVariants) {
             try {
-              results = await jackettStructuredSearch({ ...plan.search, ...v }, indexer, timeout, jUrl, jKey);
+              // Passa a variante limpa: remove os DEMAIS IDs para que só o da
+              // variante seja enviado (senão o imdbId sempre prevaleceria).
+              results = await jackettStructuredSearch({ ...plan.search, ...v, imdbId: v.imdbId || null, tmdbId: v.tmdbId || null, tvdbId: v.tvdbId || null }, indexer, timeout, jUrl, jKey);
             } catch (err) {
               if (err.response?.status === 429) throw err;
             }
