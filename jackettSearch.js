@@ -586,9 +586,12 @@ function filterBadMatches(results, parsed, plan) {
       if (aliases.length && normTitle(aliases[0]).length >= 4) {
         const overlap = normalizedTokenOverlap(title, aliases);
         const score = titleMatchScore(title, aliases);
-        // Sem overlap de tokens relevantes ou sem correspondência de título
-        // relevante → resultado errado (ex.: outro filme com o mesmo termo parcial).
-        if (overlap < 0.34 && score < 0.5) {
+        // Se o resultado tem idioma utilitário/prioritário, NÃO remover: o título
+        // pode estar traduzido ("Obsessão" vs "Obsession") e a tokenização não
+        // casar, mas é exatamente o que o usuário procura. Só descarta o que
+        // claramente não corresponde E não tem marcador de idioma.
+        const hasLang = /(\bdub(lado)?\b|dubbed|pt[-_. ]?br|\bpor\b|\bportugu[eê]s|portuguese|brazilian|\[multi\]|multi[-_. ]audio|spanish|espa[nñ]ol|french|fran[cç]ais|english|-eng\b|\beng\b)/i.test(title);
+        if (overlap < 0.34 && score < 0.5 && !hasLang) {
           console.log(`[Filtro] Removido filme sem correspondência (overlap=${overlap.toFixed(2)}, score=${score.toFixed(2)}): ${title}`);
           return false;
         }
