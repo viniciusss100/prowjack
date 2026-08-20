@@ -119,7 +119,10 @@ async function cfgDbSave(id, prefs, configDbUrl, configDbTable) {
 
 // ─── File-based store ────────────────────────────────────────────────────────
 const CONFIG_FILE = (() => {
-  const dir = process.env.CONFIG_DATA_DIR || "/data";
+  let dir = process.env.CONFIG_DATA_DIR || "";
+  // Se CONFIG_DATA_DIR for uma URL (ex.: alguém colou a string do Postgres por
+  // engano), não a use como diretório — cairia em mkdir de um caminho inválido.
+  if (!dir || /^[a-z][a-z0-9+.-]*:\/\//i.test(dir)) dir = "/data";
   return path.join(dir, "prowjack_configs.json");
 })();
 
@@ -152,9 +155,15 @@ async function saveStoredConfig(prefs, configDbUrl, configDbTable) {
   configDbTable = getConfigDbTable(configDbTable);
   const id = crypto.createHash("sha256").update(JSON.stringify(prefs)).digest("base64url").slice(0, 32);
   if (shouldUseConfigDb(configDbUrl)) {
-    await cfgDbSave(id, prefs, configDbUrl, configDbTable);
+    try {
+      await cfgDbSave(id, prefs, configDbUrl, configDbTable);
+    } catch (err) {
+      console.error(`[CFG] Falha ao salvar no Postgres (env: POSTGRES_URL/CONFIG_DATABASE_URL): ${err?.message || err}`);
+      throw err;
+    }
     return `cfg_${id}`;
   }
+  console.warn(`[CFG] Nenhuma env de banco definida (POSTGRES_URL/CONFIG_DATABASE_URL/DATABASE_URL). Salvando em arquivo: ${CONFIG_FILE}`);
   const store = cfgStore();
   store[id] = JSON.stringify(prefs);
   cfgFileSave(store);
