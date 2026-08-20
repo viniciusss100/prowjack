@@ -461,8 +461,11 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         if (da !== db) return da - db;
         if (a._priorityIndexer && !b._priorityIndexer) return -1;
         if (!a._priorityIndexer && b._priorityIndexer) return 1;
-        const dpl = (_stHasPriorityLang(b) ? 0 : 1) - (_stHasPriorityLang(a) ? 0 : 1); if (dpl !== 0) return dpl;
-        const dkw = (_stHasKeyword(b) ? 0 : 1) - (_stHasKeyword(a) ? 0 : 1); if (dkw !== 0) return dkw;
+        const dpl = (_stHasPriorityLang(b) ? 0 : 1) - (_stHasPriorityLang(a) ? 0 : 1);
+        const dkw = (_stHasKeyword(b) ? 0 : 1) - (_stHasKeyword(a) ? 0 : 1);
+        // Keyword priorizada sobre o idioma selecionado:
+        if (dkw !== 0) return dkw;
+        if (dpl !== 0) return dpl;
         return 0;
       });
 
@@ -712,14 +715,21 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) {
               r._titleMatchScore = 1; r._keywordMatch = true; return true;
             }
-            // onlyDubbed=true: filtra por idioma TODOS os resultados (inclusive priority/scrap)
+            // Scrap externo (ex.: BrasilRD): usuário já optou por essas fontes e
+            // elas retornam conteúdo dublado/legendado em PT-BR — manter mesmo com
+            // onlyDubbed (senão esconde streams dublados cujo nome não marca idioma).
+            if (r._scrapSource) {
+              r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
+              return true;
+            }
+            // onlyDubbed=true: filtra por idioma os resultados regulares
             if (prefs.onlyDubbed && priorityLang) {
               const titleForLang = r.Title || r._title || "";
               const langs = getLangs(titleForLang, parsed.isAnime);
               const hasLang = langs.some(l => l.code === priorityLang);
               if (!hasLang) return false;
             }
-            if (r._priorityIndexer || r._scrapSource) {
+            if (r._priorityIndexer) {
               r._titleMatchScore = Math.max(r._titleMatchScore || 0, 1);
               return true;
             }
@@ -761,7 +771,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             const langs   = getLangs(t, parsed.isAnime);
             const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
             const isMulti = /(multi)[-.\\s]?(audio)?/i.test(t);
-            const langPriority = hasLang ? 3 : (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost) ? 2 : (isMulti ? 1 : 0));
+            const langPriority = (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost)) ? 4 : (hasLang ? 3 : (isMulti ? 1 : 0));
             r._originalScore = ((r._priorityIndexer ? 1 : 0) * 5000000) +
               (langPriority * 100000) +
               ((r._metaIdMatch    ? 1 : 0) * 40000) +
@@ -984,8 +994,8 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       .sort((a, b) => {
         const dc = candidateCacheRank(a) - candidateCacheRank(b); if (dc !== 0) return dc;
         const dpi = (b._priorityIndexer ? 1 : 0) - (a._priorityIndexer ? 1 : 0); if (dpi !== 0) return dpi;
-        const dl = candidateLangRank(a) - candidateLangRank(b); if (dl !== 0) return dl;
         const dk = candidateKeywordRank(a) - candidateKeywordRank(b); if (dk !== 0) return dk;
+        const dl = candidateLangRank(a) - candidateLangRank(b); if (dl !== 0) return dl;
         const dq = candidateQualScore(b) - candidateQualScore(a); if (dq !== 0) return dq;
         const dr = candidateResScore(b) - candidateResScore(a); if (dr !== 0) return dr;
         const dz = (b.Size || 0) - (a.Size || 0); if (dz !== 0) return dz;
@@ -1474,8 +1484,8 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const dh = _httpRank(a) - _httpRank(b); if (dh !== 0) return dh;
       const dc = _cacheRank(a) - _cacheRank(b); if (dc !== 0) return dc;
       const dpi = _priorityIndexerRank(a) - _priorityIndexerRank(b); if (dpi !== 0) return dpi;
-      const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
       const dk = _keywordRank(a) - _keywordRank(b); if (dk !== 0) return dk;
+      const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
       const ds = (b._originalScore || 0) - (a._originalScore || 0); if (ds !== 0) return ds;
       const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
       const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
