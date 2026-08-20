@@ -18,7 +18,7 @@ const ENV = {
   apiKey:     (process.env.JACKETT_API_KEY || "").trim(),
 };
 
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 6;
 
 // Server type detection cache: "jackett" | "prowlarr" | null (unknown)
 // Keyed by `${url}:${key}` to support different instances.
@@ -212,7 +212,8 @@ async function prowlarrSearch(query, indexer, limit = 50, jUrl, jKey, timeout = 
 }
 
 async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 15000) {
-  if (!search?.mode || !search?.imdbId) return [];
+  const hasMetaId = search?.imdbId || search?.tmdbId || search?.tvdbId;
+  if (!search?.mode || !hasMetaId) return [];
   const params = {
     apikey: jKey,
     query: search.title || "",
@@ -223,6 +224,8 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
     categories: search.mode === "movie" ? [2000] : [5000],
   };
   if (search.imdbId) params.imdbId = search.imdbId.replace(/^tt/i, "");
+  if (search.tmdbId) params.tmdbId = search.tmdbId;
+  if (search.tvdbId) params.tvdbId = search.tvdbId;
   if (search.season  != null) params.season  = search.season;
   if (search.episode != null) params.episode = search.episode;
   const res = await axios.get(`${jUrl}/api/v1/search`, {
@@ -255,12 +258,16 @@ async function jackettTextSearch(query, indexer, timeout, jUrl, jKey) {
 }
 
 async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
-  if (!search?.mode || !search?.imdbId) return [];
+  const hasMetaId = search?.imdbId || search?.tmdbId || search?.tvdbId;
+  if (!search?.mode || !hasMetaId) return [];
   // If server is Prowlarr, go directly to Prowlarr structured search
   if (isProwlarrServer(jUrl, jKey) !== false) {
     return prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout);
   }
-  const params = { apikey: jKey, t: search.mode, imdbid: search.imdbId, q: search.title, cat: search.mode === "movie" ? "2000" : "5000" };
+  const params = { apikey: jKey, t: search.mode, q: search.title, cat: search.mode === "movie" ? "2000" : "5000" };
+  if (search.imdbId)    params.imdbid  = search.imdbId.replace(/^tt/i, "");
+  if (search.tmdbId)    params.tmdbid  = search.tmdbId;
+  if (search.tvdbId)    params.tvdbid  = search.tvdbId;
   if (search.year)    params.year   = search.year;
   if (search.season  != null) params.season = search.season;
   if (search.episode != null) params.ep     = search.episode;
@@ -301,34 +308,42 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
       const t0 = Date.now();
       try {
         let results = [];
-        // Structured search (IMDB/season/episode) — jackettStructuredSearch and
-        // prowlarrStructuredSearch are now routed internally by server type detection.
+        // Busca única por METADADOS — sem texto livre para não-anime.
+        // Cadela de IDs de metadado (IMDb → TMDB → TVDB), um por vez: evita
+        // mandar múltiplos IDs que alguns indexers não aceitam e só troca de
+        // fonte se a anterior não entregou o episódio/título correto.
         if (plan.search && !plan.parsed?.isAnime) {
-          try {
-            results = await jackettStructuredSearch(plan.search, indexer, timeout, jUrl, jKey);
-          } catch (err) {
-            console.log(`  ${indexer}: erro na busca estruturada: ${err.message}`);
-            if (err.response?.status === 429) throw err;
+          const metaVariants = [
+            { imdbId: plan.search.imdbId },
+            plan.search.tmdbId ? { tmdbId: plan.search.tmdbId } : null,
+            plan.search.tvdbId ? { tvdbId: plan.search.tvdbId } : null,
+          ].filter(Boolean);
+          for (const v of metaVariants) {
+            try {
+              results = await jackettStructuredSearch({ ...plan.search, ...v }, indexer, timeout, jUrl, jKey);
+            } catch (err) {
+              if (err.response?.status === 429) throw err;
+            }
+            const good = plan.parsed?.season != null && plan.parsed?.episode != null
+              ? results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))
+              : results.length > 0;
+            if (good) break;
+            results = [];
           }
         }
         const hasCorrectEpisode = plan.parsed?.season != null && plan.parsed?.episode != null
           ? results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))
           : results.length > 0;
-        // Não descartamos resultados estruturados válidos. Se algum já contém o
-        // episódio alvo, os usamos; caso contrário, complementamos com a busca
-        // por texto (targeted "Título SxxExx") — que costuma achar o episódio.
-        // Assim evitamos devolver vazio (Issue StremThru) e evitamos re-introduzir
-        // resultados errados de episódios diferentes (Issue correção de busca).
-        if (results.length === 0 || !hasCorrectEpisode) {
-          const wantEpisode = plan.parsed?.season != null && plan.parsed?.episode != null;
+        // Anime: a busca é montada a partir do título de metadado (Kitsu/MAL) e dos
+        // indexers de anime, ainda sem ID padronizado em Torznab.
+        if (plan.parsed?.isAnime && (results.length === 0 || !hasCorrectEpisode)) {
           for (const query of plan.queries) {
             try {
               const textResults = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
               results.push(...textResults);
-              if (!wantEpisode) break;
-              if (results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))) break;
+              if (results.some(r => animeEpisodeMatches(r.Title || "", plan.parsed.episode))) break;
             } catch (err) {
-              console.log(`  ${indexer}: erro na busca por texto "${query}": ${err.message}`);
+              console.log(`  ${indexer}: erro na busca por metadado "${query}": ${err.message}`);
               if (err.response?.status === 429) throw err;
             }
           }
@@ -512,18 +527,29 @@ async function jackettSearch(plan, indexers, prefs) {
     dedupe: prefs.dedupe !== false,
   })).toString("base64url")}`;
   const cached    = await rc.get(cacheKey);
-  if (cached) {
-    console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
+  if (cached && String(cached).trim() !== "[]") {
     try {
       const parsed = JSON.parse(cached);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.results) {
-        const res = parsed.results;
-        if (parsed._incomplete) res._incomplete = true;
-        return res;
+      // Ignora/envelhece caches VAZIOS: resultado vazio pode ter sido gravado por
+      // uma falha "instantânea" (busca em que todos os indexers falharam rápido).
+      // Nesse caso, refazemos a busca ao vivo em vez de servir "sem resultados".
+      let resultsArr = null;
+      if (Array.isArray(parsed)) resultsArr = parsed;
+      else if (parsed && typeof parsed === "object" && parsed.results) resultsArr = parsed.results;
+      if (!resultsArr || resultsArr.length === 0) {
+        console.log(`Cache VAZIO ignorado para buscas: ${JSON.stringify(queryList)} — refazendo busca ao vivo`);
+        rc.del(cacheKey).catch(()=>{});
+        throw new Error("EMPTY_CACHE_BUST");
       }
-      return parsed;
-    } catch {
-      return JSON.parse(cached);
+      console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
+      if (!Array.isArray(parsed) && parsed._incomplete) resultsArr._incomplete = true;
+      return resultsArr;
+    } catch (err) {
+      if (err.message === "EMPTY_CACHE_BUST") {
+        // cai para a busca ao vivo abaixo
+      } else {
+        try { return JSON.parse(cached); } catch { /* busca ao vivo */ }
+      }
     }
   }
   const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 8000);
@@ -592,13 +618,18 @@ async function jackettSearch(plan, indexers, prefs) {
   fastPhaseActive = false;
   const fastFlat    = filterBadMatches([...resultsByIndexer.values()].flat(), plan?.parsed, plan);
   const fastDeduped = prefs.dedupe !== false ? dedupeResults(fastFlat) : fastFlat;
-  if (resultsByIndexer.size < indexers.length) {
+  const incomplete  = resultsByIndexer.size < indexers.length;
+  if (incomplete) {
     fastDeduped._incomplete = true;
   }
   const t1 = Date.now();
   console.log(`[Scrape] Conclusão da janela rápida em ${t1 - t0}ms: ${fastFlat.length} brutos -> ${fastDeduped.length} ${prefs.dedupe !== false ? 'deduplicados' : 'resultados'}`);
+  // Nunca cachear resultado VAZIO nem resultado incompleto com TTL longo:
+  //  • vazio → próximo request refaz a busca ao vivo (evita "sem resultados" instantâneo);
+  //  • incompleto → TTL curto para não servir falha parcial por horas.
   if (fastDeduped.length > 0) {
-    rc.set(cacheKey, JSON.stringify({ _incomplete: fastDeduped._incomplete || false, results: fastDeduped }), 120).catch(()=>{});
+    const ttl = incomplete ? 30 : 120;
+    rc.set(cacheKey, JSON.stringify({ _incomplete: incomplete, results: fastDeduped }), ttl).catch(()=>{});
   }
 
   Promise.all(searchPromises).then(async (allResults) => {
@@ -606,10 +637,13 @@ async function jackettSearch(plan, indexers, prefs) {
       const slowFlat    = filterBadMatches(allResults.flat(), plan?.parsed, plan);
       const slowDeduped = prefs.dedupe !== false ? dedupeResults(slowFlat) : slowFlat;
       const t2 = Date.now();
-      if (slowDeduped.length > fastDeduped.length) {
+      // Só "promove" para cache completo de 3h quando NENHUM indexer falhou por
+      // timeout (resultsByIndexer.size === indexers.length) e o resultado é real.
+      const complete = resultsByIndexer.size >= indexers.length;
+      if (slowDeduped.length > fastDeduped.length && complete) {
         console.log(`[Background] Conclusão total do scrape em ${t2 - t0}ms. Cache atualizado: ${fastDeduped.length} -> ${slowDeduped.length}`);
         if (slowDeduped.length > 0) await rc.set(cacheKey, JSON.stringify({ _incomplete: false, results: slowDeduped }), 10800);
-      } else {
+      } else if (complete && fastDeduped.length > 0) {
         if (fastDeduped.length > 0) await rc.set(cacheKey, JSON.stringify({ _incomplete: false, results: fastDeduped }), 10800);
       }
     } catch {}
@@ -642,6 +676,30 @@ async function getCinemetaTitle(type, imdbId) {
   } catch {
     return { title: imdbId, aliases: [normTitle(imdbId)], imdbId, year: null, isAnime: false };
   }
+}
+
+// Resolve IDs de metadados adicionais (TMDB/TVDB) a partir do IMDb via API do TMDB.
+// Usados pela busca estruturada para dar fallback por metadado (em vez de texto livre).
+async function getMetadataIds(imdbId, type) {
+  const meta = { tmdbId: null, tvdbId: null };
+  const apiKey = (process.env.TMDB_API_KEY || "").trim();
+  const bearer = (process.env.TMDB_BEARER_TOKEN || "").trim();
+  if ((!apiKey && !bearer) || !imdbId) return meta;
+  const cleanId = String(imdbId).replace(/^tt/i, "");
+  if (!/^\d+$/.test(cleanId)) return meta;
+  const headers = bearer ? { Authorization: `Bearer ${bearer}` } : {};
+  const params  = apiKey ? { api_key: apiKey, external_source: "imdb_id", language: "pt-BR" } : { external_source: "imdb_id", language: "pt-BR" };
+  try {
+    const res = await axios.get("https://api.themoviedb.org/3/find/tt" + cleanId, {
+      params, headers, timeout: 5000, validateStatus: s => s < 500,
+    });
+    const stremioType = type === "movie" ? "movie" : "series";
+    const list = stremioType === "movie" ? res.data?.movie_results : res.data?.tv_results;
+    const first = Array.isArray(list) && list[0];
+    if (first?.id) meta.tmdbId = String(first.id);
+    meta.tvdbId = first?.external_ids?.tvdb_id != null ? String(first.external_ids.tvdb_id) : (first?.tvdb_id != null ? String(first.tvdb_id) : null);
+  } catch {}
+  return meta;
 }
 
 async function getKitsuMeta(kitsuId) {
@@ -767,6 +825,7 @@ async function buildQueries(type, id) {
     episode, year: meta.year, search: parsed.isAnime ? null : {
       mode   : type === "movie" ? "movie" : "tvsearch",
       imdbId : meta.imdbId, title: meta.title, year: meta.year, season: parsed.season, episode: parsed.episode,
+      ...(await getMetadataIds(meta.imdbId, type)),
     },
   };
 }

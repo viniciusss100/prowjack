@@ -106,9 +106,22 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
         }
         return true;
       })
+      .map(r => {
+        // Priorização de idioma/keyword aplicada ANTES de resolução/seeders:
+        // mesmo com onlyDubbed desmarcado, resultados no idioma selecionado
+        // (ou com keyword boost) ficam à frente dos demais.
+        const hasPrioLang = priorityLang && (
+          getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang) ||
+          (priorityLang === "pt-br" && /(dublado|dubbed.*pt|pt[-_. ]?br|\bpor\b|\bpt\b|portugu[eê]s|portuguese|brazilian)/i.test(r.Title || ""))
+        );
+        const hasKeyword = !!(prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost));
+        const langRank = hasPrioLang ? 3 : (hasKeyword ? 2 : (/multi/i.test(r.Title || "") ? 1 : 0));
+        r._rankBoost = langRank * 1000000;
+        return r;
+      })
       .sort((a, b) =>
-        (((b._priorityIndexer ? 1 : 0) * 5000000) + score(b, prefs.weights, parsed.isAnime, priorityLang)) -
-        (((a._priorityIndexer ? 1 : 0) * 5000000) + score(a, prefs.weights, parsed.isAnime, priorityLang))
+        (((b._priorityIndexer ? 1 : 0) * 5000000) + (b._rankBoost || 0) + score(b, prefs.weights, parsed.isAnime, priorityLang)) -
+        (((a._priorityIndexer ? 1 : 0) * 5000000) + (a._rankBoost || 0) + score(a, prefs.weights, parsed.isAnime, priorityLang))
       )
       .slice(0, prefs.maxResults || 20);
 
