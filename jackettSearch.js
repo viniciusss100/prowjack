@@ -219,7 +219,7 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
     query: search.title || "",
     type: search.mode === "movie" ? "movie" : "tvsearch",
     indexerIds: indexer,
-    limit: 50,
+    limit: typeof search.limit === "number" ? search.limit : 50,
     offset: 0,
     categories: search.mode === "movie" ? [2000] : [5000],
   };
@@ -275,6 +275,7 @@ async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
   if (search.year)    params.year   = search.year;
   if (search.season  != null) params.season = search.season;
   if (search.episode != null) params.ep     = search.episode;
+  if (typeof search.limit === "number") params.limit = search.limit;
 
   const res = await axios.get(
     `${jUrl}/api/v2.0/indexers/${indexer}/results/torznab/api`,
@@ -378,18 +379,38 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
             plan.search.tmdbId ? { tmdbId: plan.search.tmdbId } : null,
             plan.search.tvdbId ? { tvdbId: plan.search.tvdbId } : null,
           ].filter(Boolean);
+          const wantsEpisode = plan.parsed?.season != null && plan.parsed?.episode != null;
           for (const v of metaVariants) {
+            // 1º: busca com season + episode exatos.
+            const merged = { ...plan.search, ...v, imdbId: v.imdbId || null, tmdbId: v.tmdbId || null, tvdbId: v.tvdbId || null };
             try {
-              // Passa a variante limpa: remove os DEMAIS IDs para que só o da
-              // variante seja enviado (senão o imdbId sempre prevaleceria).
-              results = await jackettStructuredSearch({ ...plan.search, ...v, imdbId: v.imdbId || null, tmdbId: v.tmdbId || null, tvdbId: v.tvdbId || null }, indexer, timeout, jUrl, jKey);
+              results = await jackettStructuredSearch(merged, indexer, timeout, jUrl, jKey);
             } catch (err) {
               if (err.response?.status === 429) throw err;
             }
-            const good = plan.parsed?.season != null && plan.parsed?.episode != null
+            const good = wantsEpisode
               ? results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))
               : results.length > 0;
             if (good) break;
+            // 2º: se o episódio exato não veio, busca só a TEMPORADA inteira
+            // (sem episode) com limite maior. Alguns indexers ignoram o `episode`
+            // na busca estruturada e retornam uma janela que não inclui o alvo;
+            // pedir a temporada toda captura todos os episódios de uma vez e o
+            // filterBadMatches mantém apenas o correto (sem falsos positivos).
+            if (wantsEpisode) {
+              try {
+                const seasonResults = await jackettStructuredSearch(
+                  { ...merged, episode: undefined, limit: 200 },
+                  indexer, timeout, jUrl, jKey
+                );
+                if (seasonResults.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))) {
+                  results = seasonResults;
+                  break;
+                }
+              } catch (err) {
+                if (err.response?.status === 429) throw err;
+              }
+            }
             results = [];
           }
         }

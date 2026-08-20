@@ -208,8 +208,17 @@ async function loadStoredUserCfg(str, configDbUrl, configDbTable) {
 }
 
 async function resolvePrefs(encoded) {
-  const stored = encoded ? await loadStoredUserCfg(encoded) : null;
-  const decoded = stored || (encoded ? (decodeUserCfg(encoded) || {}) : {});
+  let stored = null;
+  try {
+    stored = encoded ? await loadStoredUserCfg(encoded) : null;
+  } catch (err) {
+    console.error(`[CFG] Erro ao carregar config '${encoded}': ${err?.message || err}. Usando defaults.`);
+  }
+  const decodedDirect = encoded ? decodeUserCfg(encoded) : null;
+  const decoded = stored || decodedDirect || {};
+  if (encoded && !stored && !decodedDirect) {
+    console.warn(`[CFG] Config '${encoded}' não encontrada (Postgres/arquivo). Addon usando configuração padrão — reinstale o addon ou reaplique a config para persistir.`);
+  }
   return normalizePrefs(decoded);
 }
 
