@@ -46,19 +46,15 @@ function buildConfigPgOptions(rawUrl) {
   const isSupabasePooler = /pooler\.supabase\.com|supabase\.co/i.test(hostname);
   // Supabase (pooler) em runtime serverless (Vercel/Functions) exige SSL, mas o
   // bundle de CA do runtime nem sempre contém o certificado → rejectUnauthorized:true
-  // dispara "self-signed certificate"/"unable to verify". Por padrão conectamos com
-  // rejectUnauthorized:false quando o SSL é exigido, a menos que o operador force
-  // validação real via DB_SSL_REJECT_UNAUTHORIZED=true.
+  // dispara "self-signed certificate"/"unable to verify". Para o pooler do Supabase
+  // sempre conectamos com rejectUnauthorized:false (não honramos DB_SSL_REJECT_UNAUTHORIZED
+  // para esse caso, pois validação de CA não funciona no serverless com o pooler).
   let ssl = undefined;
-  if (isRemote && sslMode && sslMode !== "disable") {
+  if (isRemote && isSupabasePooler) {
+    ssl = { rejectUnauthorized: false };
+  } else if (isRemote && sslMode && sslMode !== "disable") {
     const reject = process.env.DB_SSL_REJECT_UNAUTHORIZED;
-    const validate = reject === "true";
-    ssl = validate ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
-  } else if (isRemote && isSupabasePooler) {
-    // Segurança extra: evita que o pg infira SSL de outra forma e falhe no pooler.
-    ssl = process.env.DB_SSL_REJECT_UNAUTHORIZED === "true"
-      ? { rejectUnauthorized: true }
-      : { rejectUnauthorized: false };
+    ssl = reject === "true" ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
   }
   return { connectionString, ssl };
 }
