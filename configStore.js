@@ -34,15 +34,25 @@ function buildConfigPgOptions(rawUrl) {
     const parsed = new URL(rawUrl);
     hostname = parsed.hostname;
     sslMode = String(parsed.searchParams.get("sslmode") || "").toLowerCase();
+    // postgres.js e alguns clientes precisam de 'sslmode' na string, mas o
+    // node-postgres (pg) usa a opção 'ssl' configurada acima. Removemos para
+    // evitar conflito de propagação de 'sslmode' para o backend.
     parsed.searchParams.delete("sslmode");
     parsed.searchParams.delete("uselibpqcompat");
     connectionString = parsed.toString();
   } catch {}
 
   const isRemote = /^postgres/i.test(rawUrl) && !/^(localhost|127\.0\.0\.1|::1)$/i.test(hostname);
-  const ssl = isRemote && sslMode !== "disable"
-    ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
-    : undefined;
+  // Supabase (pooler) em runtime serverless (Vercel/Functions) exige SSL, mas o
+  // bundle de CA do runtime nem sempre contém o certificado → rejectUnauthorized:true
+  // dispara "self-signed certificate"/"unable to verify". Por padrão conectamos com
+  // rejectUnauthorized:false quando o SSL é exigido (sslmode=require), a menos que o
+  // operador force validação real via DB_SSL_REJECT_UNAUTHORIZED=true.
+  let ssl = undefined;
+  if (isRemote && sslMode && sslMode !== "disable") {
+    const reject = process.env.DB_SSL_REJECT_UNAUTHORIZED;
+    ssl = reject === "true" ? { rejectUnauthorized: true } : { rejectUnauthorized: false };
+  }
   return { connectionString, ssl };
 }
 
@@ -73,7 +83,11 @@ async function ensureConfigDb(configDbUrl, configDbTable) {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `);
+    `).catch((err) => {
+      configPgInit = null;
+      console.error(`[CFG] Falha ao inicializar a tabela Postgres '${configDbTable}':`, err?.message || err);
+      throw err;
+    });
   }
   await configPgInit;
   return pool;
