@@ -441,12 +441,28 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           console.log(`[QB/ST] Erro ao buscar private trackers do cache: ${e.message}`);
         }
       }
+      // Priorização por idioma/keyword também no fluxo StremThru. Sem isso, os
+      // streams vindos do Wrap eram entregues na ordem de resolução do debrid
+      // (tipicamente idioma original primeiro), ignorando o PT-BR priorizado e as
+      // keywords mesmo com onlyDubbed desmarcado.
+      const _stPriorityLang = prefs.priorityLang ?? "pt-br";
+      const _stHasPriorityLang = (s) => {
+        const t = [s.description, s.name, s.behaviorHints?.filename, s._title].filter(Boolean).join(" ");
+        const langs = getLangs(t, parsed.isAnime);
+        return !!(
+          (_stPriorityLang && langs.some(l => l.code === _stPriorityLang)) ||
+          (_stPriorityLang === "pt-br" && /(dublado|dubbed.*pt|pt[-_. ]?br|\bpor\b|\bpt\b|portugu[eê]s|portuguese|brazilian)/i.test(t))
+        );
+      };
+      const _stHasKeyword = (s) => !!(prefs.keywordBoost && matchesKeywordBoost([s.description, s.name, s.behaviorHints?.filename].filter(Boolean).join(" "), prefs.keywordBoost));
       combined.sort((a, b) => {
         const da = a._cached ? 0 : (a._sourceType === "debrid" ? 1 : 2);
         const db = b._cached ? 0 : (b._sourceType === "debrid" ? 1 : 2);
         if (da !== db) return da - db;
         if (a._priorityIndexer && !b._priorityIndexer) return -1;
         if (!a._priorityIndexer && b._priorityIndexer) return 1;
+        const dpl = (_stHasPriorityLang(b) ? 0 : 1) - (_stHasPriorityLang(a) ? 0 : 1); if (dpl !== 0) return dpl;
+        const dkw = (_stHasKeyword(b) ? 0 : 1) - (_stHasKeyword(a) ? 0 : 1); if (dkw !== 0) return dkw;
         return 0;
       });
 
