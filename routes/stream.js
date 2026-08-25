@@ -1,65 +1,58 @@
 const express = require("express");
+const axios = require("axios");
 const router = express.Router();
-const path = require("path");
-const crypto = require("crypto");
-const { isConfigured: isQbitConfigured, ensureTorrentReady, getPlayableLocalFile, streamTorrentFile } = require("../providers/qbittorrent");
-const { ENV, CACHE_VERSION, STREAM_CACHE_VERSION, TORRENT_DOWNLOAD_TIMEOUT_MS, PUBLIC_TRACKERS, BAD_RE, BAD_EXT_RE, QB_EXTRA_SLOTS, MIN_STREAM_SEEDS, STREMTHRU_PROXY_TIMEOUT_MS } = require("../constants");
-const { rc, redis, saveQbitJob, loadQbitJob } = require("../cache");
-const { decodeUserCfg, resolvePrefs } = require("../configStore");
-const { normalizePrefs, sanitizeUserPrefs, clampNumber, defaultPrefs } = require("../prefs");
+const { getPlayableLocalFile } = require("../providers/qbittorrent");
+const { ENV, CACHE_VERSION, STREAM_CACHE_VERSION, BAD_RE, BAD_EXT_RE, QB_EXTRA_SLOTS, MIN_STREAM_SEEDS, STREMTHRU_PROXY_TIMEOUT_MS } = require("../constants");
+const { rc, saveQbitJob } = require("../cache");
+const { resolvePrefs } = require("../configStore");
 const {
   getPublicBase,
   buildStremThruProxyManifestUrl,
   isQbitEnabledForPrefs,
   shouldOfferQbitForResult,
-  getRequestAccessToken,
-  hasAdminAccess,
-  requireAdminAccess,
-  getRssFastPathResults,
-  sendConfigurePage,
   fetchScrapStreams,
-  isPrivateTrackerCandidate,
-  checkRateLimit
+  extractScrapIndexer,
+  scrapExternalDescription,
+  isPrivateTrackerCandidate
 } = require("../routeHelpers");
 const {
-  RESOLUTION, QUALITY, CODEC, AUDIO, VISUAL, LANG,
-  TITLE_CLEANUP_REGEX, STOPWORDS,
-  first, matchAll, uniq, normTitle,
-  getLangs, score,
-  normalizeTitleTokens, escapedWordRegex,
+  RESOLUTION, QUALITY,
+  first, getLangs, score,
   titleMatchScore, relaxedTitleMatchScore,
   extractReleaseYear, normalizeImdbId, getResultImdbId,
-  looksLikeEpisodeRelease, isCompletePack,
-  parseEpisodeRanges, hasAnyEpisodeMarker,
+  looksLikeEpisodeRelease,
   episodeMatchRank, animeEpisodeMatchRank,
   seriesEpisodeMatches, animeEpisodeMatches,
-  normalizeForDedupe, dedupeResults, dedupeWithCachePriority,
-  extractGroup, fmtBytes,
-  renameIndexer, stripSourceBadges,
+  dedupeWithCachePriority,
+  renameIndexer,
   visibleSeedCount, matchesKeywordBoost,
-  splitFilterTerms, textHasAnyTerm,
-  resultIndexerText, isPriorityIndexerResult, isRdExcludedResult,
+  isPriorityIndexerResult, isRdExcludedResult,
   hasDirectInfoHash, formatStream
 } = require("../scoring");
-const { decodeXmlEntities } = require("../jackettSearch"); // Fallback for some strings
 
 const streamWaiters = new Map();
-const {
-  base32ToHex, extractInfoHash, extractInfoBuf, decodeBencode, extractTorrentFiles,
-  pickEpisodeFile, normalizeTorrentLink, torrentFailureKeys, torrentDownloadRecentlyFailed,
-  markTorrentDownloadFailed, infoHashQueueKey, InfoHashQueue, infoHashQueue, resolveInfoHash
-} = require("../torrentUtils");
-const {
-  jackettFetchIndexers, fetchIndexerPrivacyMap, jackettSearch, buildQueries, resolveSearchIndexers, parseStreamId
-} = require("../jackettSearch");
-const {
-  getPreferredRssIndexers, loadRssItemsForType, rssCatalogMetaId, getRssItemToken,
-  parseRssMetaId, parseRssItemId, extractSeriesFeedMarker, extractAnimeFeedMarker,
-  buildRssVideos, findRssItemByToken, matchRssItemsByMarker
-} = require("../rssHelpers");
-const { fetchStremThruStoreLinks, buildMagnet, resolveDebridStream } = require("../debrid");
-const { fetchTmdbMeta, getImdbIdFromTmdb } = require("../metadata");
-const { enrichWithTorrentData, enrichJackettResults, EXTRA_TRACKERS, extractTrackers, injectTrackers } = require("../torrentEnrich");
+const { pickEpisodeFile, infoHashQueue, resolveInfoHash } = require("../torrentUtils");
+const { jackettSearch, buildQueries, resolveSearchIndexers, parseStreamId } = require("../jackettSearch");
+const { loadRssItemsForType, findRssItemByToken, matchRssItemsByMarker } = require("../rssHelpers");
+const { buildMagnet, resolveDebridStream } = require("../debrid");
+const { EXTRA_TRACKERS, extractTrackers, injectTrackers } = require("../torrentEnrich");
+
+// Título unificado para streams vindos do Wrap StremThru (internos e de addons
+// externos): "ProwJack\n⚡️ 🔵 FHD [TB]" — mesmo formato do debrid nativo.
+// A fonte/indexador do addon externo fica na descrição (⚙️/📡).
+const ST_RES_LABELS = { "2160p": "🟣 4K", "1440p": "🟡 2K", "1080p": "🔵 FHD", "720p": "🟢 HD", "576p": "⚫ SD", "480p": "⚫ SD" };
+function wrapStreamDisplayName(rawName, s, addonName) {
+  const nameStr = String(rawName || "");
+  const tag = (nameStr.match(/\[([^\]\n]{1,8})\]/) || [])[1] || "";
+  let resLabel = nameStr.split("\n").map(l => l.trim()).find(l => /^[🟣🟡🔵🟢⚫]/u.test(l)) || "";
+  if (!resLabel) {
+    const text = [s.title, s.description, s.behaviorHints?.streamQuality, nameStr].filter(Boolean).join(" ");
+    const r = first(RESOLUTION, text);
+    resLabel = r ? (ST_RES_LABELS[r.label] || r.label) : "";
+  }
+  const emoji = nameStr.includes("⏳") ? "⏳" : nameStr.includes("⬇") ? "⬇️" : "⚡️";
+  return `${addonName}\n${emoji} ${resLabel || "Links"}${tag ? ` [${tag}]` : ""}`;
+}
 
 
 router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
@@ -350,19 +343,23 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
              return !(isPrivate && isUncached);
           })
           .map(s => {
+          const rawName = String(s.name || "");
           let desc = s.description || s.title || "";
           const filename = s.behaviorHints?.filename;
-          if (filename && !desc.includes(filename)) {
+          // Streams de addons externos (upstreams do Wrap): nome sem o addonName
+          // do ProwJack → reconstrói a descrição com indexador (⚙️) e fonte (📡).
+          const isExternalUpstream = !rawName.includes(addonName);
+          if (isExternalUpstream) {
+            const sourceLabel = rawName.split("\n")[0]
+              .replace(/^[^[]*\[[^\]]*\]\s*/, "")
+              .trim() || "Addon Externo";
+            desc = scrapExternalDescription(s, sourceLabel);
+          } else if (filename && !desc.includes(filename)) {
             desc += `\n📂 ${filename}`;
           }
-          const cleanName = (s.name || "")
-            .split("\n")
-            .map(l => l.trim())
-            .filter(Boolean)
-            .join("\n");
           return {
             ...s,
-            name: cleanName || s.name,
+            name: wrapStreamDisplayName(rawName, s, addonName),
             description: desc.trim(),
             sources: undefined,
             title: undefined,
@@ -374,42 +371,56 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         });
       combined.push(...stStreams);
 
-      // [QB] no StremThru — abordagem correta:
+      // [QB] no StremThru:
       // A rota interna já rodou jackettSearch e populou o cache Redis.
       // A cache key não inclui debrid/stConfig, então as duas rotas compartilham a mesma
       // entrada → esta chamada é um cache hit quase instantâneo.
-      // Filtramos private trackers, recuperamos o buffer .torrent do Redis (separado do
-      // cache JSON do jackettSearch, que não sobrevive à serialização de Buffer) e
-      // criamos os jobs qBit da mesma forma que o fluxo nativo faz.
+      // IMPORTANTE: os resultados em cache são JSON puro — NUNCA têm `_resolved`
+      // (Buffer não sobrevive à serialização). O infoHash vem dos campos InfoHash/
+      // MagnetUri do próprio resultado, e o buffer .torrent (quando existir) vem do
+      // cache `torrent:<hash>` populado pela rota interna/fila de resolução.
       if (qbitEnabledForPrefs) {
         try {
           const stIndexers = await resolveSearchIndexers(prefs, parsed.isAnime);
           const allCachedResults = await jackettSearch({ parsed, queries, search }, stIndexers, prefs);
 
-          const privateResults = allCachedResults.filter(r =>
-            r._resolved?.infoHash && isPrivateTrackerCandidate(r, r._resolved)
-          );
+          const ihOf = (r) => {
+            const direct = String(r.InfoHash || "").toLowerCase();
+            if (/^[0-9a-f]{40}$/.test(direct)) return direct;
+            const m = r.MagnetUri ? String(r.MagnetUri).match(/btih:([a-fA-F0-9]{40})/i) : null;
+            return m ? m[1].toLowerCase() : null;
+          };
 
-          if (privateResults.length > 0) {
-            console.log(`[QB/ST] ${privateResults.length} tracker(s) privado(s) no cache → criando jobs qBit`);
+          // Privados primeiro; demais resultados completam o pool de slots extras.
+          const seenIh = new Set();
+          const qbPool = [];
+          for (const r of allCachedResults) {
+            const ih = ihOf(r);
+            if (!ih || seenIh.has(ih)) continue;
+            seenIh.add(ih);
+            qbPool.push({ r, ih, priv: isPrivateTrackerCandidate(r, null) });
+          }
+          qbPool.sort((a, b) => (b.priv ? 1 : 0) - (a.priv ? 1 : 0));
+          const qbSelected = qbPool.slice(0, Math.max(QB_EXTRA_SLOTS * 2, 6));
+
+          if (qbSelected.length > 0) {
+            console.log(`[QB/ST] ${qbSelected.filter(x => x.priv).length} privado(s) + ${qbSelected.filter(x => !x.priv).length} público(s) no cache → criando jobs qBit`);
 
             const qbitJobs = await Promise.all(
-              privateResults.slice(0, 5).map(async r => {
+              qbSelected.map(async ({ r, ih }) => {
                 try {
-                  const ihKey = String(r._resolved.infoHash || "").toLowerCase();
-                  if (!ihKey) return null;
+                  // Buffer .torrent via Redis quando disponível (trackers privados);
+                  // sem buffer o job ainda funciona via magnet (públicos).
+                  let torrentB64 = null;
+                  const buf = await rc.getBuffer(`torrent:${ih}`).catch(() => null);
+                  if (buf) {
+                    try { torrentB64 = injectTrackers(buf).toString("base64"); }
+                    catch  { torrentB64 = buf.toString("base64"); }
+                  }
 
-                  // Buffer via Redis — o JSON do cache jackettSearch não preserva objetos Buffer
-                  const buf = await rc.getBuffer(`torrent:${ihKey}`).catch(() => null);
-                  if (!buf) return null;
-
-                  let torrentB64;
-                  try { torrentB64 = injectTrackers(buf).toString("base64"); }
-                  catch  { torrentB64 = buf.toString("base64"); }
-
-                  const magnet = buildMagnet(r._resolved.infoHash, null, "");
+                  const magnet = buildMagnet(ih, r.MagnetUri && r.MagnetUri.startsWith("magnet:") ? r.MagnetUri : null, r.Title || "");
                   const jobToken = await saveQbitJob({
-                    infoHash: r._resolved.infoHash,
+                    infoHash: ih,
                     link:     (r.Link && !r.Link.startsWith("magnet:")) ? r.Link : null,
                     magnet,
                     fileIdx:  null,
@@ -422,14 +433,14 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
                   return {
                     name:          `\n${addonName}\n⬇️ ${resLabel || "QB"} [QB]`,
-                    description:   String(r.Title || ""),
+                    description:   [String(r.Title || ""), isPrivateTrackerCandidate(r, null) ? "🔒 Tracker Privado" : ""].filter(Boolean).join("\n"),
                     url:           `${getPublicBase(req)}/${req.params.userConfig}/qbit/${jobToken}`,
                     behaviorHints: { notWebReady: false },
                     _sourceType:   "http",
                     _cached:       false,
                   };
                 } catch (e) {
-                  console.log(`[QB/ST] Erro no job qBit para ${r._resolved?.infoHash}: ${e.message}`);
+                  console.log(`[QB/ST] Erro no job qBit para ${ih}: ${e.message}`);
                   return null;
                 }
               })
@@ -438,9 +449,15 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             combined.push(...qbitJobs.filter(Boolean));
           }
         } catch (e) {
-          console.log(`[QB/ST] Erro ao buscar private trackers do cache: ${e.message}`);
+          console.log(`[QB/ST] Erro ao buscar candidatos qBit do cache: ${e.message}`);
         }
       }
+
+      // Scrap externo no modo StremThru: os manifests de SCRAP_MANIFEST_URLS são
+      // incluídos como upstreams do próprio Wrap (buildStremThruProxyManifestUrl),
+      // que resolve seus torrents via store de debrid e os devolve já com URL.
+      // Não buscar aqui manualmente — além de redundante, streams hash-only do
+      // scrap não teriam URL sem o Wrap e seriam descartados pelo filtro abaixo.
       // Priorização por idioma/keyword também no fluxo StremThru. Sem isso, os
       // streams vindos do Wrap eram entregues na ordem de resolução do debrid
       // (tipicamente idioma original primeiro), ignorando o PT-BR priorizado e as
@@ -455,21 +472,28 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         );
       };
       const _stHasKeyword = (s) => !!(prefs.keywordBoost && matchesKeywordBoost([s.description, s.name, s.behaviorHints?.filename].filter(Boolean).join(" "), prefs.keywordBoost));
+      // Resolução para streams do Wrap: detectada no nome/descrição/filename.
+      const _stResOf = (s) => {
+        const r = first(RESOLUTION, [s.name, s.description, s.behaviorHints?.filename, s._title].filter(Boolean).join(" "));
+        return r ? r.score : 0;
+      };
+      // Mesma ordenação unificada do fluxo nativo:
+      // keywords → idioma prioritário → resolução (maior→menor) → cache.
       combined.sort((a, b) => {
-        const da = a._cached ? 0 : (a._sourceType === "debrid" ? 1 : 2);
-        const db = b._cached ? 0 : (b._sourceType === "debrid" ? 1 : 2);
-        if (da !== db) return da - db;
-        if (a._priorityIndexer && !b._priorityIndexer) return -1;
-        if (!a._priorityIndexer && b._priorityIndexer) return 1;
-        const dpl = (_stHasPriorityLang(b) ? 0 : 1) - (_stHasPriorityLang(a) ? 0 : 1);
-        const dkw = (_stHasKeyword(b) ? 0 : 1) - (_stHasKeyword(a) ? 0 : 1);
-        // Keyword priorizada sobre o idioma selecionado:
-        if (dkw !== 0) return dkw;
-        if (dpl !== 0) return dpl;
+        const dkw = (_stHasKeyword(a) ? 0 : 1) - (_stHasKeyword(b) ? 0 : 1); if (dkw !== 0) return dkw;
+        const dpl = (_stHasPriorityLang(a) ? 0 : 1) - (_stHasPriorityLang(b) ? 0 : 1); if (dpl !== 0) return dpl;
+        const drs = _stResOf(b) - _stResOf(a); if (drs !== 0) return drs;
+        const dc = (b._cached ? 0 : 1) - (a._cached ? 0 : 1); if (dc !== 0) return dc;
         return 0;
       });
 
-      const finalStreamsCombined = combined.slice(0, maxOut);
+      // Streams normais competem por maxOut; [QB] entra como slots extras
+      // (QB_EXTRA_SLOTS), igual ao fluxo nativo — não consome a lista principal.
+      const _isQbSt = (s) => typeof s.url === "string" && s.url.includes("/qbit/");
+      const stNormals  = combined.filter(s => !_isQbSt(s));
+      const stQbExtras = combined.filter(_isQbSt).slice(0, Math.max(0, QB_EXTRA_SLOTS));
+      const finalStreamsCombined = [...stNormals.slice(0, maxOut), ...stQbExtras];
+      if (stQbExtras.length) console.log(`[QB/ST] ${stQbExtras.length} stream(s) [QB] como slots extras (QB_EXTRA_SLOTS=${QB_EXTRA_SLOTS})`);
 
       // Remove campos internos antes de enviar ao Stremio
       const isStremThruProxyClient = /stremthru|go-http-client/i.test(req.headers["user-agent"] || "");
@@ -611,7 +635,13 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             let rawName = parts.length >= 2 ? (parts[0] === 'www' || parts[0] === 'api' ? parts[1] : parts[0]) : host;
             scrapName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
           } catch {}
-          return streams.map(s => ({ ...s, _scrapName: scrapName }));
+          // Prefere o nome próprio do addon (1ª linha do name) ao derivado do host
+          return streams.map(s => {
+            const ownName = String(s.name || "").split("\n")[0]
+              .replace(/^[^[]*\[[^\]]*\]\s*/, "")
+              .trim();
+            return { ...s, _scrapName: ownName || scrapName };
+          });
         }))
       : [];
 
@@ -651,9 +681,9 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         _indexerName: s._scrapName || 'Scrap Externo',
         Tracker: s._scrapName || 'Scrap Externo',
         TrackerId: 'scrap',
-        Indexer: s._scrapName || 'Scrap Externo',
-        _priorityIndexer: true,
-        _isCached: true
+        Indexer: s._scrapName || 'Scrap Externo'
+        // Sem _priorityIndexer/_isCached forçados: o addon externo NÃO tem score
+        // diferenciado — compete em igualdade com os resultados dos indexadores.
       };
     });
     
@@ -916,7 +946,6 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       console.log(`[STREMTHRU] Executando cache check nativo via API do StremThru...`);
       const _tDebrid = Date.now();
       const allHashesST = [...new Set(withHashes.map(r => String(r._resolved?.infoHash || "").toLowerCase()).filter(Boolean))];
-      const axios = require("axios");
 
       const stStore = prefs.stConfig.stores[0];
       if (stStore) {
@@ -968,6 +997,10 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
     const availabilityFiltered = (() => {
       const filtered = withHashes.filter(r => {
+        // Scrap externo não passa pelos filtros do ProwJack: o addon já curou o
+        // resultado. Mantém sempre, para que o hash seja resolvido pelo debrid
+        // (cache ou inclusão on-demand) ou entregue como P2P no modo sem debrid.
+        if (r._scrapSource) return true;
         const cached = r._isCached === true || r._scrapStream?._cached === true;
         return cached || visibleSeedCount(r) >= MIN_STREAM_SEEDS;
       });
@@ -1013,16 +1046,14 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     // streamMeta definido antes do bloco StremThru (linha ~2812)
 
     const resolvedAll = await Promise.all(
-      streamCandidates.map(async r => {
+      streamCandidates.map(async (r, candIdx) => {
         try {
           // Scrap sem infoHash (link direto/usenet) já vem resolvido pelo addon externo.
           if (r._scrapSource && r._scrapStream && !r._resolved?.infoHash) {
             const ss = r._scrapStream;
-            const desc = [ss.description || ss.title || "", ss._scrapName ? `📂 ${ss._scrapName}` : ""]
-              .filter(Boolean).join("\n");
             return {
               name: ss.name || `[Scrap] ${ss._scrapName || ""}`,
-              description: desc,
+              description: scrapExternalDescription(ss, ss._scrapName || r._indexerName || ""),
               url: ss.url,
               externalUrl: ss.externalUrl,
               behaviorHints: ss.behaviorHints || { notWebReady: false },
@@ -1033,10 +1064,21 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           
           const resolved     = r._resolved;
           const indexerName  = r._indexerName || r.Tracker || r.TrackerId || r.Indexer || "Unknown";
+          // Indexador real marcado pelo addon externo (⚙️); sem marca, mostra só a fonte.
+          const scrapIndexer = r._scrapSource
+            ? extractScrapIndexer(r._scrapStream?._title, r._scrapStream?.title, r.Title)
+            : "";
+          const fmtIndexer   = scrapIndexer || (r._scrapSource ? "" : indexerName);
           const rdExcluded   = isRdExcludedResult(r, prefs, indexerName);
           // Scrap com infoHash: formata usando a formatação nativa do addon (Scrap Externo)
-          const { name, description: descNoSeeds, resLabel } = formatStream(r, indexerName, parsed.isAnime, prefs, false, streamMeta);
-          const { description } = formatStream(r, indexerName, parsed.isAnime, prefs, true, streamMeta);
+          const { name, description: descNoSeedsBase, resLabel } = formatStream(r, fmtIndexer, parsed.isAnime, prefs, false, streamMeta);
+          let { description } = formatStream(r, fmtIndexer, parsed.isAnime, prefs, true, streamMeta);
+          let descNoSeeds    = descNoSeedsBase;
+          if (r._scrapSource) {
+            const fonteLine = `📡 ${r._scrapStream?._scrapName || indexerName}`;
+            descNoSeeds  = [descNoSeeds, fonteLine].filter(Boolean).join("\n");
+            description  = [description, fonteLine].filter(Boolean).join("\n");
+          }
           const matchedFile  = (type === "series" || parsed.isAnime)
             ? pickEpisodeFile(resolved.files, parsed.season, parsed.episode ?? episode, parsed.isAnime)
             : null;
@@ -1142,7 +1184,13 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             }
             const resultsArray = debridData.multi ? debridData.multi : [debridData];
 
-            return Promise.all(resultsArray.filter(resObj => {
+            // qBit servido JUNTO ao debrid (inclusive em resultados cached):
+            // gera a variante [QB] para os primeiros candidatos do ranking e a
+            // montagem final limita aos QB_EXTRA_SLOTS slots extras.
+            const wantQbitExtra = shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCreds)
+              && candIdx < Math.max(1, QB_EXTRA_SLOTS) * 2;
+
+            const mapped = await Promise.all(resultsArray.filter(resObj => {
               if (rdExcluded && resObj.provider === "Real-Debrid") {
                 console.log(`[RD Exclude] ${r.Title?.slice(0, 80)} (${indexerName})`);
                 return false;
@@ -1151,7 +1199,6 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             }).map(async resObj => {
               const addonName    = prefs.addonName || "ProwJack";
               const resLabelStr  = resLabel || "Links";
-              const isDual       = prefs.debridConfig?.mode === "dual";
               const providerTag  = resObj.provider === "TorBox" ? "[TB]" : "[RD]";
 
               if (resObj.url && !resObj.queued) {
@@ -1186,7 +1233,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
                 const cacheEmoji = resObj.cached ? "⚡️" : "⬇️";
                 const streamName = `${addonName}\n${cacheEmoji} ${resLabelStr} ${providerTag}`;
 
-                const debridOption = {
+                return {
                   name: streamName,
                   description: [description, filenameLine].filter(Boolean).join("\n"),
                   url:     addUrl,
@@ -1195,16 +1242,13 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
                   _priorityIndexer: !!r._priorityIndexer,
                   behaviorHints: { filename: displayFileName, videoSize: displayFile?.size, notWebReady: true },
                 };
-
-                if (shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCreds)) {
-                  const qbitOption = await buildQbitStream();
-                  return [debridOption, qbitOption];
-                }
-
-                return debridOption;
               }
               return null;
-            })).then(items => items.filter(Boolean));
+            }));
+
+            const items = mapped.filter(Boolean);
+            if (items.length && wantQbitExtra) items.push(await buildQbitStream());
+            return items;
           }
 
           // ── Modo StremThru direto (sem debrid nativo) ──────────────────
@@ -1212,7 +1256,6 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             const _addonName = prefs.addonName || "ProwJack";
             const _stStore = prefs.stConfig.stores[0];
             if (!_stStore) return null;
-            const _stAxios = require("axios");
             const _stHeaders = { "X-StremThru-Store-Name": _stStore.c, "X-StremThru-Store-Authorization": `Bearer ${_stStore.t}` };
             const _baseUrl = prefs.stConfig.url.replace(/\/+$/, "");
 
@@ -1223,7 +1266,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
               if (!file) return null;
               if (file.link) return { link: file.link, name: file.name || file.filename, size: file.size };
               try {
-                const lr = await _stAxios.get(`${_baseUrl}/v0/store/torz/${torrentId}`, {
+                const lr = await axios.get(`${_baseUrl}/v0/store/torz/${torrentId}`, {
                   headers: _stHeaders, timeout: 10000, validateStatus: s => s < 400,
                 });
                 const freshFile = (lr.data?.data?.files || [])[pickIdx];
@@ -1257,7 +1300,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             }
 
             try {
-              const addRes = await _stAxios.post(`${_baseUrl}/v0/store/torz`,
+              const addRes = await axios.post(`${_baseUrl}/v0/store/torz`,
                 { link: magnet },
                 { headers: _stHeaders, timeout: 15000, validateStatus: () => true }
               );
@@ -1468,7 +1511,6 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
         ((priorityLang === "pt-br" && /(dublado|dubbed.*pt|pt[-_. ]?br|\bpor\b|\bpt\b|portugu[eê]s|portuguese|brazilian)/i.test(t)))
       );
     };
-    const _isMulti = (s) => /(multi|dual)[-.\\s]?(audio)?/i.test(s._title || "");
     const _sizeScore = (s) => {
       const size = Number(s._sizeGb || 0);
       return size > 0 ? size : 0;
@@ -1480,15 +1522,19 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
     const _keywordRank = (s) => _hasKeyword(s) ? 0 : 1;
     const _priorityIndexerRank = (s) => s._priorityIndexer ? 0 : 1;
 
+    // Ordenação unificada (indexadores + addon externo, sem score diferenciado):
+    // 1) Keywords da UI → 2) idioma prioritário da UI → 3) resolução (maior→menor);
+    // demais critérios (qbit/cache/priorityIndexer/score/qualidade/tamanho/seeds)
+    // servem apenas de desempate dentro de cada grupo.
     dedupedStreams.sort((a, b) => {
+      const dk = _keywordRank(a) - _keywordRank(b); if (dk !== 0) return dk;
+      const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
+      const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
       const dh = _httpRank(a) - _httpRank(b); if (dh !== 0) return dh;
       const dc = _cacheRank(a) - _cacheRank(b); if (dc !== 0) return dc;
       const dpi = _priorityIndexerRank(a) - _priorityIndexerRank(b); if (dpi !== 0) return dpi;
-      const dk = _keywordRank(a) - _keywordRank(b); if (dk !== 0) return dk;
-      const dl = _langRank(a) - _langRank(b); if (dl !== 0) return dl;
       const ds = (b._originalScore || 0) - (a._originalScore || 0); if (ds !== 0) return ds;
       const dq = _qualScore(b) - _qualScore(a); if (dq !== 0) return dq;
-      const dr = _resScore(b)  - _resScore(a);  if (dr !== 0) return dr;
       const dz = _sizeScore(b) - _sizeScore(a); if (dz !== 0) return dz;
       return (b._seeders || 0) - (a._seeders || 0);
     });

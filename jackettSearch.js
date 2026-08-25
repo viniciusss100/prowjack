@@ -460,16 +460,21 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
 }
 
 async function trackMetrics(indexer, ms, count, ok) {
-  const key = `metrics:${indexer}`;
-  const raw = await rc.get(key);
-  const m   = raw ? JSON.parse(raw) : { calls: 0, totalMs: 0, totalResults: 0, failures: 0 };
-  m.calls++; m.totalMs += ms; m.totalResults += count;
-  if (!ok) m.failures++;
-  m.avgMs       = Math.round(m.totalMs      / m.calls);
-  m.avgResults  = Math.round(m.totalResults / m.calls);
-  m.successRate = Math.round(((m.calls - m.failures) / m.calls) * 100);
-  m.lastCall    = new Date().toISOString();
-  await rc.set(key, JSON.stringify(m), 86400);
+  // Nunca propagar erro: métricas não podem derrubar resultados de busca já obtidos.
+  try {
+    const key = `metrics:${indexer}`;
+    let m = null;
+    const raw = await rc.get(key);
+    if (raw) { try { m = JSON.parse(raw); } catch {} }
+    if (!m || typeof m !== "object") m = { calls: 0, totalMs: 0, totalResults: 0, failures: 0 };
+    m.calls++; m.totalMs += ms; m.totalResults += count;
+    if (!ok) m.failures++;
+    m.avgMs       = Math.round(m.totalMs      / m.calls);
+    m.avgResults  = Math.round(m.totalResults / m.calls);
+    m.successRate = Math.round(((m.calls - m.failures) / m.calls) * 100);
+    m.lastCall    = new Date().toISOString();
+    await rc.set(key, JSON.stringify(m), 86400);
+  } catch {}
 }
 
 /**

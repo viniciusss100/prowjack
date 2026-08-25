@@ -1,6 +1,6 @@
 {
   "name": "prowjack",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "Qbittorrent+Prowlarr/Jackett+Debrid",
   "main": "addon.js",
   "scripts": {
@@ -11,11 +11,8 @@
     "axios": "^1.7.0",
     "dotenv": "^17.4.2",
     "express": "^4.19.0",
-    "form-data": "^4.0.0",
     "ioredis": "^5.3.0",
-    "node-fetch": "^2.7.0",
-    "pg": "^8.21.0",
-    "stremio-addon-sdk": "^1.6.10"
+    "pg": "^8.21.0"
   },
   "devDependencies": {
     "acorn": "^8.17.0",

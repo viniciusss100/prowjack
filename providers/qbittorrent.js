@@ -23,6 +23,7 @@ try {
 }
 const QBIT_CATEGORY = process.env.QBIT_CATEGORY || "prowjack-private";
 const QBIT_TAGS     = process.env.QBIT_TAGS     || "prowjack";
+const DEBUG_QBIT    = /^(1|true|yes)$/i.test(process.env.DEBUG_QBIT || "");
 const MIN_PROGRESS  = Math.min(1, Math.max(0.005, parseFloat(process.env.QBIT_MIN_PROGRESS || "0.02")));
 const BUFFER_TIMEOUT = parseInt(process.env.QBIT_BUFFER_TIMEOUT || "180", 10);
 const POLL_INTERVAL  = 3000;
@@ -411,24 +412,18 @@ function resolveFilePath(info, file) {
     throw new Error("Path inválido detectado");
   }
 
-  const base = path.resolve(QBIT_SAVE_DIR);
-
-  // Verifica se o caminho resolvido é válido (como relative já está sanitizado contra .., o path final é seguro)
-  const safePath = (p) => {
-    // Apenas retorna o path, já que o input (relative) não contém .. ou / absolutos
-    return p;
-  };
-
   const checkExists = (p) => {
-    console.log(`[qBit-Debug] Verificando existência de: ${p}`);
-    if (fs.existsSync(p)) { console.log(`[qBit-Debug] -> ENCONTRADO (normal)`); return safePath(p); }
-    if (fs.existsSync(p + ".!qB")) { console.log(`[qBit-Debug] -> ENCONTRADO (.!qB)`); return safePath(p + ".!qB"); }
-    console.log(`[qBit-Debug] -> NÃO ENCONTRADO`);
+    if (DEBUG_QBIT) console.log(`[qBit-Debug] Verificando existência de: ${p}`);
+    if (fs.existsSync(p)) return p;
+    if (fs.existsSync(p + ".!qB")) return p + ".!qB";
+    if (DEBUG_QBIT) console.log(`[qBit-Debug] -> NÃO ENCONTRADO`);
     return null;
   };
 
-  console.log(`[qBit-Debug] resolveFilePath iniciado. relative=${relative}`);
-  console.log(`[qBit-Debug] info.content_path=${info.content_path}, info.name=${info.name}`);
+  if (DEBUG_QBIT) {
+    console.log(`[qBit-Debug] resolveFilePath iniciado. relative=${relative}`);
+    console.log(`[qBit-Debug] info.content_path=${info.content_path}, info.name=${info.name}`);
+  }
 
   // 1ª tentativa: caminho direto em QBIT_SAVE_DIR (ex: arquivo avulso)
   const byDir = path.join(QBIT_SAVE_DIR, relative);
@@ -462,12 +457,12 @@ function resolveFilePath(info, file) {
     }
   }
 
-  console.log(`[qBit-Debug] 3a tentativa rootBase=${path.basename(normalizedRoot)} finalPath=${finalPath}`);
+  if (DEBUG_QBIT) console.log(`[qBit-Debug] 3a tentativa rootBase=${path.basename(normalizedRoot)} finalPath=${finalPath}`);
 
   const res3 = checkExists(finalPath);
   if (res3) return res3;
 
-  console.log(`[qBit-Debug] FALHA TOTAL. Retornando null`);
+  if (DEBUG_QBIT) console.log(`[qBit-Debug] FALHA TOTAL. Retornando null`);
   return null; // Mudança importante: retornar null se não encontrar em vez de string falsa
 }
 

@@ -3,6 +3,7 @@ const axios  = require("axios");
 const https  = require("https");
 const crypto = require("crypto");
 const { enrichMetaPtBr } = require("./metadata");
+const { CACHE_VERSION } = require("./constants");
 
 https.globalAgent.setMaxListeners(50);
 require("events").EventEmitter.defaultMaxListeners = 50;
@@ -10,7 +11,6 @@ require("events").EventEmitter.defaultMaxListeners = 50;
 const POLL_INTERVAL_MS = 45 * 60 * 1000;
 const RSS_CACHE_TTL    = 24 * 3600;
 const CATALOG_TTL      = 24 * 3600;
-const CACHE_VERSION    = "v12-native-debrid";
 
 // ╔════════════════════════════════════════════════════════════════════╗
 // ║ OTIMIZAÇÃO #1: Cache compilado para regex (não recompila)         ║

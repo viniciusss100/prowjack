@@ -1,21 +1,12 @@
-const crypto = require("crypto");
 const path = require("path");
-const fs = require("fs");
 const axios = require("axios");
-const { rc, redis } = require("./cache");
-const { getPreferredRssIndexers, loadRssItemsForType, buildRssVideos, matchRssItemsByMarker } = require("./rssHelpers");
-const { stripSourceBadges } = require("./scoring");
 const { ENV, PUBLIC_TRACKERS } = require("./constants");
+const { stripSourceBadges } = require("./scoring");
 const { isConfigured: isQbitConfigured } = require("./providers/qbittorrent");
 
 const rateLimitStore = new Map();
 const RATE_LIMIT_WINDOW = 60000;
 const RATE_LIMIT_THRESHOLD = 100;
-
-const memoryStore = {
-  ips: new Map(),
-  hashes: new Map()
-};
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -27,17 +18,17 @@ function checkRateLimit(ip) {
   }
 
   const entry = rateLimitStore.get(ip);
-  
+
   if (!entry) {
     rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
     return true;
   }
-  
+
   if (entry.resetAt <= now) {
     rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW });
     return true;
   }
-  
+
   if (entry.count >= RATE_LIMIT_THRESHOLD) return false;
   entry.count++;
   return true;
@@ -64,9 +55,18 @@ function buildStremThruProxyManifestUrl(req, prefs, userConfig) {
   }
   // Usa a rota interna como upstream — evita loop de StremThru chamando StremThru
   const internalManifest = `${absolutePublicBase(req)}/internal/${userConfig}/manifest.json`;
+  // Addons externos (SCRAP_MANIFEST_URLS) entram como upstreams adicionais:
+  // assim seus torrents passam pelo Wrap apenas para resolução/inclusão na store
+  // de debrid, sem passar pelos filtros do ProwJack. Válido para todos os modos
+  // com StremThru; nos modos debrid nativo e sem debrid o scrap é buscado
+  // diretamente pela rota de stream.
+  const upstreams = [{ u: internalManifest }];
+  for (const m of ENV.scrapManifests) {
+    if (/^https?:\/\//i.test(m)) upstreams.push({ u: m });
+  }
   const storeCodeMap = { torbox: "tb", realdebrid: "rd", alldebrid: "ad", debridlink: "dl", premiumize: "pm", offcloud: "oc" };
   const wrapEncoded = Buffer.from(JSON.stringify({
-    upstreams: [{ u: internalManifest }],
+    upstreams,
     stores: prefs.stConfig.stores.map(s => ({ c: storeCodeMap[s.c] || s.c, t: s.t })),
     name: prefs.addonName || "ProwJack [ST]",
   }), "utf8").toString("base64");
@@ -97,51 +97,38 @@ function requireAdminAccess(req, res, next) {
   return res.status(403).json({ ok: false, error: "Acesso negado" });
 }
 
-async function getRssFastPathResults(parsed, prefs, type) {
-  if (parsed.source !== "rssitem" && parsed.source !== "rssmovie") return null;
-
-  const rssType = parsed.rssType || (parsed.isAnime ? "anime" : type === "movie" ? "movie" : "series");
-
-  if (parsed.source === "rssmovie") {
-    const rssHits = await loadRssItemsForType(prefs, "movie");
-    const matched = rssHits.filter(r => normalizeImdbId(r.ImdbId) === normalizeImdbId(parsed.metaId));
-    if (matched.length) {
-      console.log(`[RSS Fast-path] ${matched.length} resultados do cache RSS para ${parsed.metaId}`);
-      return matched.map((item, idx) => ({ ...item, _metaIdMatch: true, _titleMatchScore: 1, _rssPreferred: true, _rssOrder: idx }));
-    }
-    return [];
-  } 
-  
-  if (parsed.source === "rssitem") {
-    const rssHits = await loadRssItemsForType(prefs, rssType);
-    if (parsed.rssToken) {
-      const exactItem = findRssItemByToken(rssHits, parsed.rssToken);
-      if (exactItem) {
-        console.log(`[RSS Fast-path] Token encontrado no cache RSS`);
-        return [{ ...exactItem, _metaIdMatch: true, _titleMatchScore: 1, _rssPreferred: true, _rssOrder: 0 }];
-      }
-      return [];
-    } else {
-      const requestedEpisode = parsed.episode ?? 0;
-      const exactItems = matchRssItemsByMarker(
-        rssHits,
-        rssType,
-        parsed.metaId,
-        parsed.season ?? 1,
-        requestedEpisode
-      );
-      if (exactItems.length) {
-        console.log(`[RSS Fast-path] ${exactItems.length} resultados do cache RSS para S${parsed.season}E${requestedEpisode}`);
-        return exactItems.map((item, idx) => ({ ...item, _metaIdMatch: true, _titleMatchScore: 1, _rssPreferred: true, _rssOrder: idx }));
-      }
-      return [];
-    }
-  }
-  return null;
-}
-
 function sendConfigurePage(res) {
   res.sendFile(path.join(__dirname, "public", "configure.html"));
+}
+
+// Extrai o indexador real informado pelo addon externo (marcador "⚙️ Nome"),
+// ex.: BrasilRD marca "🔗 13 ⚙️ Comando Torrents" → "Comando Torrents".
+function extractScrapIndexer(...texts) {
+  const m = texts.filter(Boolean).join("\n").match(/⚙️\s*([^\n]+)/);
+  return m ? m[1].trim().slice(0, 80) : "";
+}
+
+// Descrição normalizada para streams de addons externos (modo StremThru e
+// passthrough sem infoHash): reconstrói as linhas de metadados marcadas pelo
+// addon (🌱 seeds, ⚙️ indexador, 🌐 idioma) e acrescenta a fonte com 📡.
+function scrapExternalDescription(stream, source) {
+  const text = [stream.title, stream.description, stream._title].filter(Boolean).join("\n");
+  const seedMatch = text.match(/(?:🔗|🌱|👤|👥)\s*(\d{1,6})/i);
+  const langMatch = text.match(/🌐\s*([^\n]+)/);
+  const indexer = extractScrapIndexer(text);
+  const filename = stream.behaviorHints?.filename || stream._filename || "";
+  const releaseLines = filename
+    ? []
+    : text.split("\n").map(l => l.trim()).filter(l =>
+        l && !/^(?:🔗|🌱|👤|👥)\s*\d/i.test(l) && !l.startsWith("⚙️") && !l.startsWith("🌐"));
+  return [
+    ...releaseLines.slice(0, 2),
+    seedMatch ? `🌱 ${seedMatch[1]}` : "",
+    indexer ? `⚙️ ${indexer}` : "",
+    langMatch ? `🌐 ${langMatch[1].trim().slice(0, 60)}` : "",
+    source ? `📡 ${source}` : "",
+    filename ? `📂 ${filename}` : "",
+  ].filter(Boolean).join("\n");
 }
 
 async function fetchScrapStreams(manifestUrl, type, id, options = {}) {
@@ -158,7 +145,7 @@ async function fetchScrapStreams(manifestUrl, type, id, options = {}) {
         const titleStr = s.title || "";
         const descStr = s.description || "";
         const filenameStr = s.behaviorHints?.filename || "";
-        
+
         const cleanStream = {
           ...s,
           name: options.preserveBadges ? nameStr : stripSourceBadges(nameStr),
@@ -177,23 +164,10 @@ async function fetchScrapStreams(manifestUrl, type, id, options = {}) {
         // Combina name + description para que os filtros de idioma/qualidade encontrem as tags
         const titleForFilters = [rawName, desc].filter(Boolean).join(" ");
         const size = cleanStream.behaviorHints?.videoSize || 0;
-        const seedFields = [
-          cleanStream._seeders,
-          cleanStream.seeders,
-          cleanStream.seeds,
-          cleanStream.sources?.seeders,
-          cleanStream.stats?.seeders,
-          cleanStream.behaviorHints?.seeders,
-          cleanStream.behaviorHints?.seeds,
-        ];
-        let seeders = 0;
-        for (const value of seedFields) {
-          const parsed = Number(value);
-          if (Number.isFinite(parsed)) {
-            seeders = Math.max(0, parsed);
-            break;
-          }
-        }
+        let seeders = Number(cleanStream._seeders ?? cleanStream.seeders ?? cleanStream.seeds ??
+          cleanStream.sources?.seeders ?? cleanStream.stats?.seeders ??
+          cleanStream.behaviorHints?.seeders ?? cleanStream.behaviorHints?.seeds ?? 0);
+        if (!Number.isFinite(seeders) || seeders < 0) seeders = 0;
         if (!seeders) {
           const seedText = [
             cleanStream.name,
@@ -235,10 +209,10 @@ function isPrivateTrackerCandidate(r, resolved = null) {
   if (resolved?.buffer) {
     return resolved.buffer.toString("latin1").includes("7:privatei1e");
   }
-  
+
   const indexerName = (r._indexerName || r.Tracker || r.TrackerId || r.Indexer || "").toLowerCase();
   const isKnownPublic = PUBLIC_TRACKERS.some(t => indexerName.includes(t));
-  
+
   if (isKnownPublic) return false;
   if (r?.MagnetUri) return false;
   if (r?.Link && !r.Link.startsWith("magnet:")) return true;
@@ -246,7 +220,6 @@ function isPrivateTrackerCandidate(r, resolved = null) {
 }
 
 module.exports = {
-  memoryStore,
   getPublicBase,
   buildStremThruProxyManifestUrl,
   isQbitEnabledForPrefs,
@@ -254,9 +227,10 @@ module.exports = {
   getRequestAccessToken,
   hasAdminAccess,
   requireAdminAccess,
-  getRssFastPathResults,
   sendConfigurePage,
   fetchScrapStreams,
+  extractScrapIndexer,
+  scrapExternalDescription,
   isPrivateTrackerCandidate,
   checkRateLimit
 };

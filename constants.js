@@ -36,7 +36,7 @@ const ENV = {
 };
 
 const CACHE_VERSION = "v12-native-debrid";
-const STREAM_CACHE_VERSION = "v48-st-wrap-only";
+const STREAM_CACHE_VERSION = "v52-unified-ranking";
 const TORRENT_DOWNLOAD_TIMEOUT_MS = 15000;
 
 const PUBLIC_TRACKERS = ["1337x", "thepiratebay", "eztv", "yts", "torrentgalaxy", "rutracker", "nyaasi", "nyaa", "nyaa.si", "limetorrents", "torlock", "kickass", "demonoid", "rarbg", "bitsearch", "solidtorrents", "magnetdl", "bt4g", "idope", "extratorrent", "comando", "bludv", "lapumia", "ondebaixa", "thepiratafilmes", "baixar", "torrentdosfilmes", "betor", "bitmagnet", "knaben", "stremthru", "torrentio"];

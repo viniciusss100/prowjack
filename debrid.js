@@ -255,43 +255,28 @@ async function torboxAddTorrent(magnet, key, waitForReady = false, buffer = null
   try {
     let torrentId;
 
-    if (buffer) {
-      const formData = require("form-data")();
-      formData.append("file", buffer, { filename: "torrent.torrent" });
-      const res = await axios.post("https://api.torbox.app/v1/api/torrents/createtorrent",
-        formData,
-        {
-          headers: { ...headersAuth, ...formData.getHeaders() },
-          timeout: 20000,
-          validateStatus: s => s < 500,
-        }
-      );
-      if (!res.data?.data?.torrent_id) {
-        console.log(`[TorBox] Falha ao fazer upload de arquivo: ${res.status}`);
-        if (magnet && !isFallback) {
-          console.log(`[TorBox] Tentando fallback com magnet...`);
-          return torboxAddTorrent(magnet, key, waitForReady, null, { ...options, isFallback: true });
-        }
-        return null;
+    // FormData/Blob nativos (Node 18+) — compatíveis com axios/fetch sem pacotes extras.
+    const formData = new FormData();
+    if (buffer) formData.append("file", new Blob([buffer], { type: "application/x-bittorrent" }), "torrent.torrent");
+    else        formData.append("magnet", magnet);
+
+    const res = await axios.post("https://api.torbox.app/v1/api/torrents/createtorrent",
+      formData,
+      {
+        headers: headersAuth,
+        timeout: 20000,
+        validateStatus: s => s < 500,
       }
-      torrentId = res.data.data.torrent_id;
-    } else {
-      const formData = require("form-data")();
-      formData.append("magnet", magnet);
-      const res = await axios.post("https://api.torbox.app/v1/api/torrents/createtorrent",
-        formData,
-        {
-          headers: { ...headersAuth, ...formData.getHeaders() },
-          timeout: 20000,
-          validateStatus: s => s < 500,
-        }
-      );
-      if (!res.data?.data?.torrent_id) {
-        console.log(`[TorBox] Falha ao adicionar magnet: ${res.status}`);
-        return null;
+    );
+    if (!res.data?.data?.torrent_id) {
+      console.log(`[TorBox] Falha ao adicionar ${buffer ? "upload de arquivo" : "magnet"}: ${res.status}`);
+      if (buffer && magnet && !isFallback) {
+        console.log(`[TorBox] Tentando fallback com magnet...`);
+        return torboxAddTorrent(magnet, key, waitForReady, null, { ...options, isFallback: true });
       }
-      torrentId = res.data.data.torrent_id;
+      return null;
     }
+    torrentId = res.data.data.torrent_id;
 
     if (waitForReady) {
       let retries = 0;

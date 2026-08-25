@@ -395,9 +395,6 @@ function dedupeWithCachePriority(withHashes, isDebridMode) {
 }
 
 // ─── Formatação de stream ─────────────────────────────────────────────────────
-const streamFormatCache = new Map();
-setInterval(() => streamFormatCache.clear(), 5 * 60 * 1000);
-
 function extractGroup(title) {
   const m = title.match(/[-.]([A-Z0-9]{2,12})(?:\[.+?\])?$/i);
   return m ? m[1].toUpperCase() : null;
@@ -508,14 +505,10 @@ function extractInfoHashFromMagnet(magnet) {
   return hex ? hex[1].toLowerCase() : null;
 }
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #3: Cache para formatStream                             ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// Sem cache: a saída depende de prefs.addonName e streamMeta (título/ano/temporada),
+// que não podem fazer parte de uma chave leve — cache aqui causava nome/descrição
+// errados entre usuários e títulos diferentes.
 function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = true, streamMeta = {}) {
-  const cacheKey = `${r.Title}|${showSeeds}|${indexerName}`;
-  if (streamFormatCache.has(cacheKey)) {
-    return streamFormatCache.get(cacheKey);
-  }
   const t = r.Title || "";
   const res = first(RESOLUTION, t);
   const qual = first(QUALITY, t);
@@ -566,7 +559,6 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = t
   ].filter(Boolean).join("\n");
 
   const result = { name: `${addonName}\n${resLabel}`, description: desc.trim(), resLabel };
-  streamFormatCache.set(cacheKey, result);
   return result;
 }
 

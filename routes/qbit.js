@@ -1,71 +1,22 @@
 const express = require("express");
-const router = express.Router();
-const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
 const { isConfigured: isQbitConfigured, ensureTorrentReady, getPlayableLocalFile, streamTorrentFile, waitForBuffer } = require("../providers/qbittorrent");
-const { ENV, CACHE_VERSION, STREAM_CACHE_VERSION, TORRENT_DOWNLOAD_TIMEOUT_MS } = require("../constants");
-const { rc, redis, saveQbitJob, loadQbitJob } = require("../cache");
-const { decodeUserCfg, resolvePrefs } = require("../configStore");
-const { normalizePrefs, sanitizeUserPrefs, clampNumber, defaultPrefs } = require("../prefs");
-const {
-  getPublicBase,
-  buildStremThruProxyManifestUrl,
-  isQbitEnabledForPrefs,
-  shouldOfferQbitForResult,
-  getRequestAccessToken,
-  hasAdminAccess,
-  requireAdminAccess,
-  getRssFastPathResults,
-  sendConfigurePage,
-  fetchScrapStreams,
-  isPrivateTrackerCandidate,
-  checkRateLimit
-} = require("../routeHelpers");
-const {
-  RESOLUTION, QUALITY, CODEC, AUDIO, VISUAL, LANG,
-  TITLE_CLEANUP_REGEX, STOPWORDS,
-  first, matchAll, uniq, normTitle,
-  getLangs, score,
-  normalizeTitleTokens, escapedWordRegex,
-  titleMatchScore, relaxedTitleMatchScore,
-  extractReleaseYear, normalizeImdbId, getResultImdbId,
-  looksLikeEpisodeRelease, isCompletePack,
-  parseEpisodeRanges, hasAnyEpisodeMarker,
-  episodeMatchRank, animeEpisodeMatchRank,
-  seriesEpisodeMatches, animeEpisodeMatches,
-  normalizeForDedupe, dedupeResults, dedupeWithCachePriority,
-  extractGroup, fmtBytes,
-  renameIndexer, stripSourceBadges,
-  visibleSeedCount, matchesKeywordBoost,
-  splitFilterTerms, textHasAnyTerm,
-  resultIndexerText, isPriorityIndexerResult, isRdExcludedResult,
-  hasDirectInfoHash, formatStream
-} = require("../scoring");
-const {
-  base32ToHex, extractInfoHash, extractInfoBuf, decodeBencode, extractTorrentFiles,
-  pickEpisodeFile, normalizeTorrentLink, torrentFailureKeys, torrentDownloadRecentlyFailed,
-  markTorrentDownloadFailed, infoHashQueueKey, InfoHashQueue, infoHashQueue, resolveInfoHash
-} = require("../torrentUtils");
-const {
-  jackettFetchIndexers, fetchIndexerPrivacyMap, jackettSearch, buildQueries, resolveSearchIndexers
-} = require("../jackettSearch");
-const {
-  getPreferredRssIndexers, loadRssItemsForType, rssCatalogMetaId, getRssItemToken,
-  parseRssMetaId, parseRssItemId, extractSeriesFeedMarker, extractAnimeFeedMarker,
-  buildRssVideos, findRssItemByToken, matchRssItemsByMarker
-} = require("../rssHelpers");
-const { fetchStremThruStoreLinks } = require("../debrid");
-const { fetchTmdbMeta, getImdbIdFromTmdb } = require("../metadata");
-const { enrichWithTorrentData, enrichJackettResults } = require("../torrentEnrich");
+const { TORRENT_DOWNLOAD_TIMEOUT_MS } = require("../constants");
+const { rc, loadQbitJob } = require("../cache");
+const { resolvePrefs } = require("../configStore");
+const { isQbitEnabledForPrefs } = require("../routeHelpers");
+const { torrentDownloadRecentlyFailed, markTorrentDownloadFailed } = require("../torrentUtils");
+const { torboxAddTorrent, resolveDebridStream, rdAddTorrent } = require("../debrid");
+const { injectTrackers } = require("../torrentEnrich");
 
+const router = express.Router();
 
 router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   const { provider, infoHash } = req.params;
   const magnet  = Array.isArray(req.query.magnet) ? req.query.magnet[0] : req.query.magnet;
   const linkUrl = Array.isArray(req.query.link) ? req.query.link[0] : req.query.link;
   const requestedFileId = Array.isArray(req.query.file_id) ? req.query.file_id[0] : req.query.file_id;
-  const cachedHint = String(Array.isArray(req.query.cached) ? req.query.cached[0] : req.query.cached || "") === "1";
   const seasonParam  = req.query.season  != null ? parseInt(req.query.season,  10) : null;
   const episodeParam = req.query.episode != null ? parseInt(req.query.episode, 10) : null;
   const isAnimeParam = req.query.anime === "1";
@@ -95,35 +46,11 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   const lockKey      = `addlock:${providerLower}:${accountHash}:${infoHash}`;
   const alreadyAdded = await rc.get(lockKey);
 
-  // Download do .torrent se disponível
-
-
-  let torrentBuffer = null;
-
-
-  try {
-
-
-    const cachedBuf = await rc.getBuffer(`torrent:${infoHash.toLowerCase()}`);
-
-
-    if (cachedBuf) {
-
-
-      torrentBuffer = cachedBuf;
-
-
-      console.log(`[ON-DEMAND] Buffer .torrent recuperado do cache para ${infoHash}`);
-
-
-    }
-
-
-  } catch(e) {}
-
-
-  
-
+  // Download do .torrent se disponível (cache primeiro, link como fallback)
+  let torrentBuffer = await rc.getBuffer(`torrent:${infoHash.toLowerCase()}`).catch(() => null);
+  if (torrentBuffer) {
+    console.log(`[ON-DEMAND] Buffer .torrent recuperado do cache para ${infoHash}`);
+  }
 
   if (!torrentBuffer && typeof linkUrl === "string" && linkUrl.startsWith("http")) {
     try {
@@ -161,10 +88,10 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
     try {
       if (isST) {
         const payload = { magnet };
-        const headers = { 
+        const headers = {
           "Content-Type": "application/json",
-          "X-StremThru-Store-Name": stStoreName, 
-          "X-StremThru-Store-Authorization": `Bearer ${stToken}` 
+          "X-StremThru-Store-Name": stStoreName,
+          "X-StremThru-Store-Authorization": `Bearer ${stToken}`
         };
         const addRes = await axios.post(`${stUrl}/v0/store/magnets`, payload, { headers, validateStatus: () => true });
         if (addRes.status >= 400) {
@@ -183,7 +110,6 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
            }
         }
       } else if (isTB) {
-        const { torboxAddTorrent } = require("../debrid");
         const tbResult = await torboxAddTorrent(magnet, config.torboxKey, false, torrentBuffer, { infoHash });
         if (!tbResult) {
           console.log(`[ON-DEMAND] Falha ao adicionar ao TorBox (pode já estar na fila ou erro de API)`);
@@ -197,7 +123,6 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
               await rc.del(lockKey);
               return res.redirect(302, url);
             }
-            const { resolveDebridStream } = require("../debrid");
             const stream = await resolveDebridStream(infoHash, magnet, "", seasonParam, episodeParam, isAnimeParam, config, null, null, tbResult, null);
             if (stream?.url) {
               await rc.del(lockKey);
@@ -206,7 +131,6 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
           }
         }
       } else if (isRD) {
-        const { rdAddTorrent } = require("../debrid");
         const ok = await rdAddTorrent(magnet, config.rdKey, torrentBuffer);
         if (!ok) {
           console.log(`[ON-DEMAND] Falha ao adicionar ao RD`);
@@ -222,81 +146,14 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
 
   // Polling com backoff exponencial (até 120s)
   if (isST) {
-    const deadline = Date.now() + 120000;
-    const delays   = [1000, 2000, 3000, 5000];
-    let delayIndex = 0;
-    console.log(`[ON-DEMAND] StremThru: aguardando download (até 120s)...`);
+    return await pollStremThru(res, stUrl, stStoreName, stToken, infoHash, requestedFileId);
+  }
 
-    while (Date.now() < deadline) {
-      try {
-        const remainingTime = deadline - Date.now();
-        const checkRes = await axios.get(`${stUrl}/v0/store/magnets/check?magnet=${infoHash}&local=true`, {
-          headers: { "X-StremThru-Store-Name": stStoreName, "X-StremThru-Store-Authorization": `Bearer ${stToken}` },
-          timeout: Math.min(8000, remainingTime),
-          signal: AbortSignal.timeout(remainingTime),
-          validateStatus: () => true
-        });
+  if (isTB) {
+    return await pollTorbox(res, config.torboxKey, infoHash, requestedFileId, magnet, seasonParam, episodeParam, isAnimeParam, config);
+  }
 
-        const items = checkRes.data?.data?.items || [];
-        const torrent = items.find(t => t.hash?.toLowerCase() === infoHash.toLowerCase());
-        
-        if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
-          console.log(`[ON-DEMAND] StremThru pronto! Gerando link...`);
-          const selectedFile = requestedFileId ? torrent.files.find(f => String(f.index) === String(requestedFileId)) : torrent.files[0];
-          if (selectedFile?.link) {
-            const linkRes = await axios.post(`${stUrl}/v0/store/link/generate`, { link: selectedFile.link }, { 
-              headers: { "X-StremThru-Store-Name": stStoreName, "X-StremThru-Store-Authorization": `Bearer ${stToken}` }, 
-              validateStatus: () => true 
-            });
-            if (linkRes.data?.data?.link) {
-              return res.redirect(302, linkRes.data.data.link);
-            }
-          }
-        }
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, delays[delayIndex]));
-      if (delayIndex < delays.length - 1) delayIndex++;
-    }
-    return res.status(504).send("Timeout aguardando download no StremThru");
-  } else if (isTB) {
-    const deadline = Date.now() + 120000;
-    const delays   = [1000, 2000, 3000, 5000];
-    let delayIndex = 0;
-    console.log(`[ON-DEMAND] TorBox: aguardando download (até 120s)...`);
-
-    while (Date.now() < deadline) {
-      try {
-        const remainingTime = deadline - Date.now();
-        const tbRes = await axios.get("https://api.torbox.app/v1/api/torrents/mylist", {
-          headers: { Authorization: `Bearer ${config.torboxKey}` },
-          timeout: Math.min(8000, remainingTime),
-          signal: AbortSignal.timeout(remainingTime),
-        });
-
-        const torrent = tbRes.data?.data?.find(t => t.hash?.toLowerCase() === infoHash.toLowerCase());
-
-        const isCached = torrent?.download_present === true || 
-                        torrent?.download_finished === true || 
-                        torrent?.download_state === "cached" ||
-                        (torrent?.hash && torrent?.files?.length > 0);
-        
-        if (isCached && torrent?.files?.length > 0) {
-          console.log(`[ON-DEMAND] TorBox pronto! Resolvendo stream...`);
-          if (requestedFileId) {
-            const tid = torrent.id || torrent.torrent_id;
-            const url = `https://api.torbox.app/v1/api/torrents/requestdl?token=${config.torboxKey}&torrent_id=${tid}&file_id=${encodeURIComponent(requestedFileId)}&redirect=true`;
-            return res.redirect(302, url);
-          }
-          const { resolveDebridStream } = require("../debrid");
-          const stream = await resolveDebridStream(infoHash, magnet, "", seasonParam, episodeParam, isAnimeParam, config, null, null, torrent, null);
-          if (stream?.url) return res.redirect(302, stream.url);
-        }
-      } catch (e) {}
-      await new Promise(r => setTimeout(r, delays[delayIndex]));
-      if (delayIndex < delays.length - 1) delayIndex++;
-    }
-    return res.status(504).send("Timeout aguardando download no TorBox");
-  } else if (isRD) {
+  if (isRD) {
     const fallbackHTML = `
       <html>
         <head>
@@ -327,6 +184,81 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
 
   return res.status(500).send("Debrid Provider não suportado neste fallback");
 });
+
+// ── Polling helpers (backoff: 1s → 2s → 3s → 5s, até 120s) ──────────────────
+async function pollWithBackoff(label, checkFn) {
+  const deadline = Date.now() + 120000;
+  const delays   = [1000, 2000, 3000, 5000];
+  let delayIndex = 0;
+  console.log(`[ON-DEMAND] ${label}: aguardando download (até 120s)...`);
+
+  while (Date.now() < deadline) {
+    try {
+      const result = await checkFn(Math.min(8000, deadline - Date.now()));
+      if (result) return result;
+    } catch {}
+    await new Promise(r => setTimeout(r, delays[delayIndex]));
+    if (delayIndex < delays.length - 1) delayIndex++;
+  }
+  return null;
+}
+
+async function pollStremThru(res, stUrl, stStoreName, stToken, infoHash, requestedFileId) {
+  const headers = { "X-StremThru-Store-Name": stStoreName, "X-StremThru-Store-Authorization": `Bearer ${stToken}` };
+  const redirectUrl = await pollWithBackoff("StremThru", async (remainingTime) => {
+    const checkRes = await axios.get(`${stUrl}/v0/store/magnets/check?magnet=${infoHash}&local=true`, {
+      headers,
+      timeout: remainingTime,
+      signal: AbortSignal.timeout(remainingTime),
+      validateStatus: () => true
+    });
+
+    const items = checkRes.data?.data?.items || [];
+    const torrent = items.find(t => t.hash?.toLowerCase() === infoHash.toLowerCase());
+
+    if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
+      console.log(`[ON-DEMAND] StremThru pronto! Gerando link...`);
+      const selectedFile = requestedFileId ? torrent.files.find(f => String(f.index) === String(requestedFileId)) : torrent.files[0];
+      if (selectedFile?.link) {
+        const linkRes = await axios.post(`${stUrl}/v0/store/link/generate`, { link: selectedFile.link }, { headers, validateStatus: () => true });
+        if (linkRes.data?.data?.link) return linkRes.data.data.link;
+      }
+    }
+    return null;
+  });
+  if (redirectUrl) return res.redirect(302, redirectUrl);
+  return res.status(504).send("Timeout aguardando download no StremThru");
+}
+
+async function pollTorbox(res, torboxKey, infoHash, requestedFileId, magnet, seasonParam, episodeParam, isAnimeParam, config) {
+  const redirectUrl = await pollWithBackoff("TorBox", async (remainingTime) => {
+    const tbRes = await axios.get("https://api.torbox.app/v1/api/torrents/mylist", {
+      headers: { Authorization: `Bearer ${torboxKey}` },
+      timeout: remainingTime,
+      signal: AbortSignal.timeout(remainingTime),
+    });
+
+    const torrent = tbRes.data?.data?.find(t => t.hash?.toLowerCase() === infoHash.toLowerCase());
+
+    const isCached = torrent?.download_present === true ||
+                    torrent?.download_finished === true ||
+                    torrent?.download_state === "cached" ||
+                    (torrent?.hash && torrent?.files?.length > 0);
+
+    if (isCached && torrent?.files?.length > 0) {
+      console.log(`[ON-DEMAND] TorBox pronto! Resolvendo stream...`);
+      if (requestedFileId) {
+        const tid = torrent.id || torrent.torrent_id;
+        return `https://api.torbox.app/v1/api/torrents/requestdl?token=${torboxKey}&torrent_id=${tid}&file_id=${encodeURIComponent(requestedFileId)}&redirect=true`;
+      }
+      const stream = await resolveDebridStream(infoHash, magnet, "", seasonParam, episodeParam, isAnimeParam, config, null, null, torrent, null);
+      if (stream?.url) return stream.url;
+    }
+    return null;
+  });
+  if (redirectUrl) return res.redirect(302, redirectUrl);
+  return res.status(504).send("Timeout aguardando download no TorBox");
+}
 
 router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
   const prefs = await resolvePrefs(req.params.userConfig);
@@ -389,8 +321,8 @@ router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
 
       // 4. Aguarda até que o torrent tenha buffer suficiente para reproduzir (bloqueia o request)
       await waitForBuffer(job.infoHash, job.fileIdx, job.fileName, qbitCreds);
-      
-      let playable = await getPlayableLocalFile(job.infoHash, job.fileIdx, job.fileName, qbitCreds);
+
+      playable = await getPlayableLocalFile(job.infoHash, job.fileIdx, job.fileName, qbitCreds);
 
       if (!playable) {
         // Ainda não tem buffer — responde imediatamente e deixa o player tentar em 5s.

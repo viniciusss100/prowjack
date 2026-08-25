@@ -87,16 +87,10 @@ function findBencodeEnd(buf, start) {
 }
 
 function extractInfoRaw(buf) {
-  const needle = Buffer.from("4:info");
-  for (let i = 0; i <= buf.length - needle.length; i++) {
-    let found = true;
-    for (let j = 0; j < needle.length; j++) { if (buf[i + j] !== needle[j]) { found = false; break; } }
-    if (found) {
-      const end = findBencodeEnd(buf, i + needle.length);
-      return end === -1 ? null : buf.slice(i + needle.length, end);
-    }
-  }
-  return null;
+  const pos = buf.indexOf(Buffer.from("4:info"));
+  if (pos === -1) return null;
+  const end = findBencodeEnd(buf, pos + 6);
+  return end === -1 ? null : buf.slice(pos + 6, end);
 }
 
 let DYNAMIC_TRACKERS = [...EXTRA_TRACKERS];

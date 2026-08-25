@@ -1,4 +1,5 @@
 "use strict";
+const crypto = require("crypto");
 const Redis = require("ioredis");
 
 // ─── Configuração via ENV ────────────────────────────────────────────────────
@@ -106,7 +107,6 @@ const rc = {
 };
 
 async function saveQbitJob(payload, ttl = 6 * 3600) {
-  const crypto = require("crypto");
   const token = crypto.randomBytes(18).toString("base64url");
   await rc.set(`qbitjob:${token}`, JSON.stringify(payload), ttl);
   return token;
