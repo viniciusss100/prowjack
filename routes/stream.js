@@ -17,7 +17,7 @@ const {
 } = require("../routeHelpers");
 const {
   RESOLUTION, QUALITY,
-  first, getLangs, hasPtBrKeyword, score,
+  first, getLangs, hasPtBrKeyword, hasPtBrResult, score,
   titleMatchScore, relaxedTitleMatchScore,
   extractReleaseYear, normalizeImdbId, getResultImdbId,
   looksLikeEpisodeRelease,
@@ -92,7 +92,6 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
       })
       .filter(r => r._priorityIndexer || r._scrapSource || type !== "movie" || !looksLikeEpisodeRelease(r.Title || ""))
       .filter(r => {
-        if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) return true;
         if (prefs.onlyDubbed && priorityLang) {
           const langs = getLangs(r.Title || "", parsed.isAnime);
           if (!langs.some(l => l.code === priorityLang)) return false;
@@ -105,11 +104,11 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
         // (ou com keyword boost) ficam à frente dos demais.
         const hasPrioLang = priorityLang && (
           priorityLang === "pt-br"
-            ? hasPtBrKeyword(r.Title || "")
+            ? hasPtBrResult(r)
             : getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang)
         );
         const hasKeyword = !!(prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost));
-        const langRank = hasPrioLang ? 3 : (hasKeyword ? 2 : (/multi/i.test(r.Title || "") ? 1 : 0));
+        const langRank = hasPrioLang ? 3 : (/multi/i.test(r.Title || "") ? 1 : 0);
         r._rankBoost = langRank * 1000000;
         return r;
       })
@@ -742,10 +741,6 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             return true;
           })
           .filter(r => {
-            // keywordBoost sempre passa (independente de idioma)
-            if (prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost)) {
-              r._titleMatchScore = 1; r._keywordMatch = true; return true;
-            }
             // Scrap externo (ex.: BrasilRD): usuário já optou por essas fontes e
             // elas retornam conteúdo dublado/legendado em PT-BR — manter mesmo com
             // onlyDubbed (senão esconde streams dublados cujo nome não marca idioma).
@@ -757,7 +752,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             if (prefs.onlyDubbed && priorityLang) {
               const titleForLang = r.Title || r._title || "";
               const hasLang = priorityLang === "pt-br"
-                ? hasPtBrKeyword(titleForLang)
+                ? hasPtBrResult(r)
                 : getLangs(titleForLang, parsed.isAnime).some(l => l.code === priorityLang);
               if (!hasLang) return false;
             }
@@ -780,7 +775,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             }
             if (r._priorityIndexer || r._scrapSource || r._metaIdMatch) return true;
             const hasLang = priorityLang === "pt-br"
-              ? hasPtBrKeyword(r.Title || "")
+              ? hasPtBrResult(r)
               : priorityLang ? getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang) : false;
 
             // onlyDubbed: itens que chegaram aqui já passaram pelo filtro de idioma — aceita direto
@@ -802,10 +797,10 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           .map(r => {
             const t       = r.Title || "";
             const hasLang = priorityLang === "pt-br"
-              ? hasPtBrKeyword(t)
+              ? hasPtBrResult(r)
               : priorityLang ? getLangs(t, parsed.isAnime).some(l => l.code === priorityLang) : false;
             const isMulti = /(multi)[-.\\s]?(audio)?/i.test(t);
-            const langPriority = (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost)) ? 4 : (hasLang ? 3 : (isMulti ? 1 : 0));
+            const langPriority = hasLang ? 3 : (isMulti ? 1 : 0);
             r._originalScore = ((r._priorityIndexer ? 1 : 0) * 5000000) +
               (langPriority * 100000) +
               ((r._metaIdMatch    ? 1 : 0) * 40000) +

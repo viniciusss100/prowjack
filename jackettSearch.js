@@ -182,6 +182,9 @@ function parseProwlarrResults(items, indexer) {
   return (Array.isArray(items) ? items : []).map(item => {
     const seedersParsed = item.seeders != null ? Number(item.seeders) : null;
     const seedersRaw = Number.isFinite(seedersParsed) ? seedersParsed : null;
+    const languageValues = [item.language, item.languages, item.lang, item.audioLanguages]
+      .flatMap(value => Array.isArray(value) ? value : value == null ? [] : [value])
+      .filter(Boolean);
     return {
       Title:     item.title || "",
       Guid:      item.guid || item.downloadUrl || item.magnetUrl || "",
@@ -194,6 +197,7 @@ function parseProwlarrResults(items, indexer) {
       Tracker:   item.indexer || indexer,
       TrackerId: String(item.indexerId || indexer || "").trim(),
       ImdbId:    normalizeImdbId(item.imdbId),
+      _languageText: languageValues.join(" "),
       PublishDate: item.publishDate || null,
       _structuredMatch: false,
     };

@@ -93,6 +93,10 @@ function hasPtBrKeyword(title) {
   return PT_BR_LANGUAGE_RE.test(String(title || "")) || PT_BR_KEYWORD_RE.test(String(title || ""));
 }
 
+function hasPtBrResult(result) {
+  return hasPtBrKeyword([result?.Title, result?._languageText].filter(Boolean).join(" "));
+}
+
 function score(r, weights = {}, isAnime = false, priorityLang = "") {
   const w = { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5, ...weights };
   const t = r.Title || "";
@@ -582,7 +586,7 @@ module.exports = {
   RESOLUTION, QUALITY, CODEC, AUDIO, VISUAL, LANG,
   TITLE_CLEANUP_REGEX, STOPWORDS,
   first, matchAll, uniq, normTitle,
-  getLangs, hasPtBrKeyword, score,
+  getLangs, hasPtBrKeyword, hasPtBrResult, score,
   normalizeTitleTokens, escapedWordRegex,
   titleMatchScore, relaxedTitleMatchScore, normalizedTokenOverlap,
   extractReleaseYear, normalizeImdbId, getResultImdbId,
