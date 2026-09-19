@@ -293,6 +293,15 @@ async function jackettStructuredSearch(search, indexer, timeout, jUrl, jKey) {
 
 const activeSearches = new Map();
 
+function countUsefulSearchResults(results, plan) {
+  if (!Array.isArray(results) || !results.length) return 0;
+  const aliases = uniq((plan?.queries || []).map(q => String(q || "")
+    .replace(/S\d{2}E\d{2}(-\d{2})?|S\d{2}$|\b\d{1,2}x\d{2}\b/gi, "")
+    .trim()).filter(Boolean));
+  if (!aliases.length) return results.length;
+  return results.filter(result => normalizedTokenOverlap(result.Title || "", aliases) >= 0.34).length;
+}
+
 async function setRateLimit(indexer, retryAfterHeader) {
   const parsed = parseInt(retryAfterHeader || "", 10);
   const ttl    = Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 3600) : 90;
@@ -417,6 +426,28 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
         const hasCorrectEpisode = plan.parsed?.season != null && plan.parsed?.episode != null
           ? results.some(r => titleMatchesEpisode(r.Title || "", plan.parsed.season, plan.parsed.episode))
           : results.length > 0;
+        const hasUsefulResults = plan.parsed?.season != null && plan.parsed?.episode != null
+          ? hasCorrectEpisode
+          : countUsefulSearchResults(results, plan) > 0;
+
+        // Prowlarr UI usa busca textual. Alguns indexadores retornam lixo ou
+        // falham quando recebem type=movie/tvsearch + IMDb ID, embora a busca
+        // textual funcione normalmente (caso BeTor). Reproduz esse fallback.
+        if (!plan.parsed?.isAnime && !hasUsefulResults) {
+          let textResults = [];
+          for (const query of plan.queries || []) {
+            try {
+              const found = await jackettTextSearch(query, indexer, timeout, jUrl, jKey);
+              if (!found.length) continue;
+              textResults.push(...found);
+              if (countUsefulSearchResults(found, plan) > 0) break;
+            } catch (err) {
+              if (err.response?.status === 429) throw err;
+            }
+          }
+          if (countUsefulSearchResults(textResults, plan) > 0) results = textResults;
+        }
+
         // Anime: a busca é montada a partir do título de metadado (Kitsu/MAL) e dos
         // indexers de anime, ainda sem ID padronizado em Torznab.
         if (plan.parsed?.isAnime && (results.length === 0 || !hasCorrectEpisode)) {

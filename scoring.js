@@ -47,8 +47,18 @@ const VISUAL = [
   { re: /\bhdr\b/i,                   label: "HDR"    },
   { re: /\bsdr\b/i,                   label: "SDR"    },
 ];
+const PT_BR_KEYWORDS = [
+  "0-sf", "1-sf", "andremor", "brazilian", "cr4ck3r", "dublado", "eck", "fuzeer",
+  "highvoltage", "ita-por", "lactato", "multi-audio", "multi-mwr", "porb", "porbr",
+  "port", "pt-br", "ptbr", "resu", "sgf", "silveira-team", "starkfilmes", "tr-pt",
+  "turing", "wastaken", "portuguese"
+];
+const PT_BR_DUAL_GROUPS = `100real 3lton 7sprite7 aconduta adamantium alfahd amantedoharpia andrehsa anonimo anonymous07 asm asy azx bad bdc big bioma bnd brhd brremux brt bs byjames byoutou c c0ral c76 cbr chronod cory ct cypher cza dalmaciojr dks dm domlara dsb eck eduvaldxd elm4g0 emmid eri estagiario extr3muss fabr fantasma223 ff fido filehd fly foxx franceira franzopl freddiegellar freedomhd frncr fusion g4ris gjumandi gmn gong got gris gueira inss izards jk jkr joekerr jus kallango lapumia lcd levaculik lmb ltda lucano22 lukas madruga master mdg mico micoleaodublado mlh n3g4n netope nex nogroup nous3r ntz olympus oscarniemeyer pd pf pia piratadigital plushd plusHD potatin princeputt20 professorx rarbr rk riper rlee rmb ro455 sacerdoti sh4down shaka shelby sherlock sigla siz3d spaghettimancer tars thecs thr tijuco titans tontom toonshub tossato treecher troidex tupac unknown96 upd varyg vnlls wastake witchhunter wtv wyrm xar xiquexique xprince00 yatogam1 zmg znm`.split(" ");
+const PT_BR_KEYWORD_RE = new RegExp(`(?:^|[^a-z0-9])(?:${[...PT_BR_KEYWORDS, ...PT_BR_DUAL_GROUPS.map(g => `dual-${g}`)].map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?:$|[^a-z0-9])`, "i");
+const PT_BR_LANGUAGE_RE = /(?:dublado|dubbed.*pt|pt[-_. ]?br|ptbr|portugu[eê]s|portuguese|brazilian|porbr|porb|ita[-_.]?por|tr[-_.]?pt|multi[-_. ]?(?:audio|mwr)|dual[-_. ]?audio|🇧🇷|🇵🇹)/i;
+
 const LANG = [
-  { re: /(dublado|dubbed.*pt|pt[-_. ]?br|\bpt\b|\bpor\b|portugu[eê]s|portuguese|brazilian|🇧🇷|🇵🇹)/i, code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
+  { re: /(dublado|dubbed.*pt|pt[-_. ]?br|ptbr|portugu[eê]s|portuguese|brazilian|porbr|porb|ita[-_.]?por|tr[-_.]?pt|🇧🇷|🇵🇹)/i, code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
   { re: /\b(english|eng)\b/i,                                      code: "en",    emoji: "🇺🇸", label: "EN"    },
   { re: /(espa[nñ]ol|spanish|\besp\b)/i,                           code: "es",    emoji: "🇪🇸", label: "ES"    },
   { re: /(fran[cç]ais|french|\bfre\b)/i,                           code: "fr",    emoji: "🇫🇷", label: "FR"    },
@@ -79,13 +89,19 @@ function getLangs(title) {
   return matchAll(LANG, title);
 }
 
+function hasPtBrKeyword(title) {
+  return PT_BR_LANGUAGE_RE.test(String(title || "")) || PT_BR_KEYWORD_RE.test(String(title || ""));
+}
+
 function score(r, weights = {}, isAnime = false, priorityLang = "") {
   const w = { language: 40, resolution: 30, seeders: 20, size: 5, codec: 5, ...weights };
   const t = r.Title || "";
   let s   = 0;
 
   const langs       = getLangs(t, isAnime);
-  const hasPriority = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+  const hasPriority = priorityLang === "pt-br"
+    ? hasPtBrKeyword(t)
+    : priorityLang ? langs.some(l => l.code === priorityLang) : false;
   const isMulti     = /(multi)[-.\\s]?(audio)?/i.test(t);
   const isDualAnim  = isAnime && /(dual)[-.\\s]?(audio)?/i.test(t);
 
@@ -566,7 +582,7 @@ module.exports = {
   RESOLUTION, QUALITY, CODEC, AUDIO, VISUAL, LANG,
   TITLE_CLEANUP_REGEX, STOPWORDS,
   first, matchAll, uniq, normTitle,
-  getLangs, score,
+  getLangs, hasPtBrKeyword, score,
   normalizeTitleTokens, escapedWordRegex,
   titleMatchScore, relaxedTitleMatchScore, normalizedTokenOverlap,
   extractReleaseYear, normalizeImdbId, getResultImdbId,

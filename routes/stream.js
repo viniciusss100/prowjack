@@ -17,7 +17,7 @@ const {
 } = require("../routeHelpers");
 const {
   RESOLUTION, QUALITY,
-  first, getLangs, score,
+  first, getLangs, hasPtBrKeyword, score,
   titleMatchScore, relaxedTitleMatchScore,
   extractReleaseYear, normalizeImdbId, getResultImdbId,
   looksLikeEpisodeRelease,
@@ -104,8 +104,9 @@ router.get("/internal/:userConfig/stream/:type/:id.json", async (req, res) => {
         // mesmo com onlyDubbed desmarcado, resultados no idioma selecionado
         // (ou com keyword boost) ficam à frente dos demais.
         const hasPrioLang = priorityLang && (
-          getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang) ||
-          (priorityLang === "pt-br" && /(dublado|dubbed.*pt|pt[-_. ]?br|\bpor\b|\bpt\b|portugu[eê]s|portuguese|brazilian)/i.test(r.Title || ""))
+          priorityLang === "pt-br"
+            ? hasPtBrKeyword(r.Title || "")
+            : getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang)
         );
         const hasKeyword = !!(prefs.keywordBoost && matchesKeywordBoost(r.Title || "", prefs.keywordBoost));
         const langRank = hasPrioLang ? 3 : (hasKeyword ? 2 : (/multi/i.test(r.Title || "") ? 1 : 0));
@@ -755,8 +756,9 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             // onlyDubbed=true: filtra por idioma os resultados regulares
             if (prefs.onlyDubbed && priorityLang) {
               const titleForLang = r.Title || r._title || "";
-              const langs = getLangs(titleForLang, parsed.isAnime);
-              const hasLang = langs.some(l => l.code === priorityLang);
+              const hasLang = priorityLang === "pt-br"
+                ? hasPtBrKeyword(titleForLang)
+                : getLangs(titleForLang, parsed.isAnime).some(l => l.code === priorityLang);
               if (!hasLang) return false;
             }
             if (r._priorityIndexer) {
@@ -777,8 +779,9 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
               r._metaIdMatch = true; return true;
             }
             if (r._priorityIndexer || r._scrapSource || r._metaIdMatch) return true;
-            const langs   = getLangs(r.Title || "", parsed.isAnime);
-            const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+            const hasLang = priorityLang === "pt-br"
+              ? hasPtBrKeyword(r.Title || "")
+              : priorityLang ? getLangs(r.Title || "", parsed.isAnime).some(l => l.code === priorityLang) : false;
 
             // onlyDubbed: itens que chegaram aqui já passaram pelo filtro de idioma — aceita direto
             if (prefs.onlyDubbed && priorityLang && hasLang) {
@@ -798,8 +801,9 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           .filter(r => { if (r._priorityIndexer || r._scrapSource) return true; if (type !== "movie" || !year) return true; const ry = extractReleaseYear(r.Title || ""); return !ry || Math.abs(ry - year) <= 1; })
           .map(r => {
             const t       = r.Title || "";
-            const langs   = getLangs(t, parsed.isAnime);
-            const hasLang = priorityLang ? langs.some(l => l.code === priorityLang) : false;
+            const hasLang = priorityLang === "pt-br"
+              ? hasPtBrKeyword(t)
+              : priorityLang ? getLangs(t, parsed.isAnime).some(l => l.code === priorityLang) : false;
             const isMulti = /(multi)[-.\\s]?(audio)?/i.test(t);
             const langPriority = (prefs.keywordBoost && matchesKeywordBoost(t, prefs.keywordBoost)) ? 4 : (hasLang ? 3 : (isMulti ? 1 : 0));
             r._originalScore = ((r._priorityIndexer ? 1 : 0) * 5000000) +
