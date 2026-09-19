@@ -216,7 +216,9 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
   if (!search?.mode || !hasMetaId) return [];
   const params = {
     apikey: jKey,
-    query: search.title || "",
+    // BeTor monta /search/imdb/... quando recebe q + imdbid, mas rota correta
+    // para busca estruturada é /imdb/... ou /imdb/.../season/....
+    query: "",
     type: search.mode === "movie" ? "movie" : "tvsearch",
     indexerIds: indexer,
     limit: typeof search.limit === "number" ? search.limit : 50,
