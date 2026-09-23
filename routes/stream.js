@@ -710,7 +710,10 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
           .filter(r => {
             const isPrio = isPriorityIndexerResult(r, prefs);
             if (isPrio) r._priorityIndexer = true;
-            return isPrio || r._scrapSource || !prefs.skipBadReleases || !BAD_RE.test(r.Title || "");
+            // FIX (qualidade): o filtro CAM/TS/telesync também vale para streams de
+            // addons externos (SCRAP_MANIFEST_URLS) — antes o _scrapSource pulava a
+            // checagem e releases de baixa qualidade entravam na lista.
+            return isPrio || !prefs.skipBadReleases || !BAD_RE.test(r.Title || "");
           })
           .filter(r => r._priorityIndexer || r._scrapSource || type !== "movie" || !looksLikeEpisodeRelease(r.Title || ""))
           .filter(r => {

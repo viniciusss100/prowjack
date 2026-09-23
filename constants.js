@@ -54,7 +54,10 @@ const STREAM_CACHE_VERSION = "v52-unified-ranking";
 const TORRENT_DOWNLOAD_TIMEOUT_MS = 15000;
 
 const PUBLIC_TRACKERS = ["1337x", "thepiratebay", "eztv", "yts", "torrentgalaxy", "rutracker", "nyaasi", "nyaa", "nyaa.si", "limetorrents", "torlock", "kickass", "demonoid", "rarbg", "bitsearch", "solidtorrents", "magnetdl", "bt4g", "idope", "extratorrent", "comando", "bludv", "lapumia", "ondebaixa", "thepiratafilmes", "baixar", "torrentdosfilmes", "betor", "bitmagnet", "knaben", "stremthru", "torrentio"];
-const BAD_RE = /\b(cam|hdcam|camrip|workprint)\b/i;
+// Releases de baixa qualidade (cam/ts/telesync/etc). Usado quando o usuário ativa
+// "Skip CAM/TS" (prefs.skipBadReleases, padrão ligado). Aplica-se a indexadores E
+// a streams que vêm de addons externos (SCRAP_MANIFEST_URLS).
+const BAD_RE = /\b(cam(hd)?|camrip|hdcam|telesync|telsync|telecine|tsrip|tcrip|hdts|hdrip-ts|dvdscr|screener|workprint)\b/i;
 const BAD_EXT_RE = /\.(iso|r\d{2}|zip|rar|7z|tar|gz|zipx|arj|txt|nfo|jpg|png|pdf|exe|bat|cmd|scr|msi|ps1|vbs|js|jar|com|pif|reg|dll|sys|lnk|url)$/i;
 
 const TORRENT_FAILURE_TTL = 3600000;
