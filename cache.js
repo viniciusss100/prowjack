@@ -1,6 +1,7 @@
 "use strict";
 const crypto = require("crypto");
 const Redis = require("ioredis");
+const logger = require("./logger");
 
 // ─── Configuração via ENV ────────────────────────────────────────────────────
 // Importado depois que ENV é definido no addon.js; aqui lemos direto do process.env
@@ -9,25 +10,44 @@ const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 let redis = null;
 const memoryStore = new Map();
 
-try {
-  redis = new Redis(REDIS_URL, { lazyConnect: true, enableOfflineQueue: false });
-  let hasLoggedError = false;
-  redis.on("connect", () => {
-    console.log(`✅ Redis conectado: ${REDIS_URL}`);
-    hasLoggedError = false;
-  });
-  redis.on("error",   (err) => {
-    if (!hasLoggedError) {
-      console.log(`❌ Redis erro: ${err.message} (logs adicionais de erro silenciados)`);
-      hasLoggedError = true;
-    }
-  });
-  redis.on("close",   () => {
-    if (hasLoggedError) return; // Se já deu erro, não repete o 'desconectado' eternamente
-    console.log(`⚠️ Redis desconectado`);
-  });
-} catch (err) {
-  console.log(`❌ Redis falha na inicialização: ${err.message}`);
+// Ambientes serverless (Vercel/HF) podem não ter Redis. PROJACK_REDIS_DISABLED=1
+// força modo memória pura (sem cliente ioredis), evitando retries infinitos que
+// mantêm o processo vivo e geram ruído de conexão a cada cold start.
+const REDIS_DISABLED =
+  process.env.PROJACK_REDIS_DISABLED === "1" ||
+  process.env.PROJACK_REDIS_DISABLED === "true";
+
+if (!REDIS_DISABLED) {
+  try {
+    redis = new Redis(REDIS_URL, { lazyConnect: true, enableOfflineQueue: false, maxRetriesPerRequest: 3 });
+    let hasLoggedError = false;
+    const safeRedisUrl = (() => {
+      try {
+        const u = new URL(REDIS_URL);
+        if (u.username) u.username = "***";
+        if (u.password) u.password = "***";
+        return u.toString();
+      } catch { return REDIS_URL ? "(configurado)" : "(vazio)"; }
+    })();
+    redis.on("connect", () => {
+      logger.info(`✅ Redis conectado: ${safeRedisUrl}`);
+      hasLoggedError = false;
+    });
+    redis.on("error",   (err) => {
+      if (!hasLoggedError) {
+        logger.warn(`❌ Redis erro: ${err.message} (logs adicionais de erro silenciados)`);
+        hasLoggedError = true;
+      }
+    });
+    redis.on("close",   () => {
+      if (hasLoggedError) return; // Se já deu erro, não repete o 'desconectado' eternamente
+      logger.warn(`⚠️ Redis desconectado`);
+    });
+  } catch (err) {
+    logger.warn(`❌ Redis falha na inicialização: ${err.message}`);
+  }
+} else {
+  logger.info(`[cache] Redis desabilitado (PROJACK_REDIS_DISABLED=1) — usando memória pura.`);
 }
 
 function memoryGet(k) {
@@ -57,7 +77,7 @@ function cleanExpiredMemory() {
   }
 }
 
-setInterval(cleanExpiredMemory, 60000);
+setInterval(cleanExpiredMemory, 60000).unref();
 
 // rc: interface unificada Redis + memória
 const rc = {

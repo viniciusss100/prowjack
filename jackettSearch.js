@@ -2,11 +2,12 @@
 const crypto = require("crypto");
 const axios  = require("axios");
 const { rc } = require("./cache");
-const { 
-  normTitle, 
-  uniq, 
-  normalizeImdbId, 
-  extractReleaseYear, 
+const logger = require("./logger");
+const {
+  normTitle,
+  uniq,
+  normalizeImdbId,
+  extractReleaseYear,
   dedupeResults,
   animeEpisodeMatches,
   titleMatchScore,
@@ -220,9 +221,15 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
   if (!search?.mode || !hasMetaId) return [];
   const params = {
     apikey: jKey,
-    // BeTor monta /search/imdb/... quando recebe q + imdbid, mas rota correta
-    // para busca estruturada é /imdb/... ou /imdb/.../season/....
-    query: "",
+    // FIX (BUG CRÍTICO 1): enviar query vazia fazia o Prowlarr IGNORAR o imdbId e
+    // executar uma busca de categoria (catálogo inteiro) no indexador. Isso era
+    // confirmado nos logs do Prowlarr ("Term: [], Categories: [2000]") e resultava
+    // em dezenas/milhões de itens não relacionados — que os filtros do ProwJack
+    // descartavam → busca sem resultados e indexadores marcados como "falhos".
+    // Enviar o título real junto com os IDs de metadado faz o Prowlarr encaminhar
+    // uma busca estruturada útil ao indexador (comprovado: q+imdbid → resultados
+    // relevantes e filtrados pelo Prowlarr, inclusive para Betor via /imdb/tt).
+    query: search.title || "",
     type: search.mode === "movie" ? "movie" : "tvsearch",
     indexerIds: indexer,
     limit: typeof search.limit === "number" ? search.limit : 50,
@@ -233,6 +240,7 @@ async function prowlarrStructuredSearch(search, indexer, jUrl, jKey, timeout = 1
   if (search.imdbId)        params.imdbId = search.imdbId.replace(/^tt/i, "");
   else if (search.tmdbId)   params.tmdbId = search.tmdbId;
   else if (search.tvdbId)   params.tvdbId = search.tvdbId;
+  if (search.year)         params.year     = search.year;
   if (search.season  != null) params.season  = search.season;
   if (search.episode != null) params.episode = search.episode;
   const res = await axios.get(`${jUrl}/api/v1/search`, {
@@ -376,7 +384,7 @@ function buildAnimeQueryFallsback(query) {
 
 async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl, jKey) {
   if (await isRateLimited(indexer)) return [];
-  
+
   const searchKey = `${indexer.url || indexer}|${JSON.stringify(plan.queries)}|${JSON.stringify(plan.search || {})}`;
   let searchPromise = activeSearches.get(searchKey);
   if (!searchPromise) {
@@ -475,14 +483,15 @@ async function jackettSearchOneIndexer(indexer, plan, timeout, fastTimeout, jUrl
         const ms   = Date.now() - t0;
         await trackMetrics(indexer, ms, results.length, true);
         const mode = results.some(r => r._structuredMatch) ? "estruturado" : "texto";
-        console.log(`  ${indexer}: ${results.length} resultados (${ms}ms, ${mode})`);
+        logger.debug(`  ${indexer}: ${results.length} resultados (${ms}ms, ${mode})`);
         return results;
       } catch (err) {
         const ms = Date.now() - t0;
-        console.log(`  ${indexer}: ERRO FATAL: ${err.message} (${ms}ms)`);
+        await trackMetrics(indexer, ms, 0, false);
+        logger.warn(`  ${indexer}: ERRO FATAL: ${err.message} (${ms}ms)`);
         if (err.response?.status === 429) await setRateLimit(indexer, err.response?.headers?.["retry-after"]);
         if (err.code === "ECONNABORTED" && timeout === fastTimeout)
-          console.log(`  ${indexer}: timeout lento de ${ms}ms (indo para background)`);
+          logger.debug(`  ${indexer}: timeout lento de ${ms}ms (indo para background)`);
         return [];
       }
     })();
@@ -601,12 +610,12 @@ function filterBadMatches(results, parsed, plan) {
     if (parsed.type === "series" && targetSeason != null && targetEpisode != null) {
       if (!parsed.isAnime) {
         if (!titleMatchesEpisode(title, targetSeason, targetEpisode)) {
-          console.log(`[Filtro] Removido episódio diferente (T${targetSeason}E${targetEpisode}): ${title}`);
+          logger.debug(`[Filtro] Removido episódio diferente (T${targetSeason}E${targetEpisode}): ${title}`);
           return false;
         }
       } else {
         if (!animeEpisodeMatches(title, targetEpisode)) {
-          console.log(`[Filtro] Removido falso positivo Anime (E${targetEpisode}): ${title}`);
+          logger.debug(`[Filtro] Removido falso positivo Anime (E${targetEpisode}): ${title}`);
           return false;
         }
       }
@@ -617,7 +626,7 @@ function filterBadMatches(results, parsed, plan) {
       if (aliases.length && normTitle(aliases[0]).length >= 4) {
         const overlap = normalizedTokenOverlap(title, aliases);
         if (overlap < 0.4) {
-          console.log(`[Filtro] Removido sem correspondência de título (overlap=${overlap.toFixed(2)}): ${title}`);
+          logger.debug(`[Filtro] Removido sem correspondência de título (overlap=${overlap.toFixed(2)}): ${title}`);
           return false;
         }
       }
@@ -634,7 +643,7 @@ function filterBadMatches(results, parsed, plan) {
         // claramente não corresponde E não tem marcador de idioma.
         const hasLang = /(\bdub(lado)?\b|dubbed|pt[-_. ]?br|\bpor\b|\bportugu[eê]s|portuguese|brazilian|\[multi\]|multi[-_. ]audio|spanish|espa[nñ]ol|french|fran[cç]ais|english|-eng\b|\beng\b)/i.test(title);
         if (overlap < 0.34 && score < 0.5 && !hasLang) {
-          console.log(`[Filtro] Removido filme sem correspondência (overlap=${overlap.toFixed(2)}, score=${score.toFixed(2)}): ${title}`);
+          logger.debug(`[Filtro] Removido filme sem correspondência (overlap=${overlap.toFixed(2)}, score=${score.toFixed(2)}): ${title}`);
           return false;
         }
       }
@@ -669,11 +678,11 @@ async function jackettSearch(plan, indexers, prefs) {
       if (Array.isArray(parsed)) resultsArr = parsed;
       else if (parsed && typeof parsed === "object" && parsed.results) resultsArr = parsed.results;
       if (!resultsArr || resultsArr.length === 0) {
-        console.log(`Cache VAZIO ignorado para buscas: ${JSON.stringify(queryList)} — refazendo busca ao vivo`);
+        logger.debug(`Cache VAZIO ignorado para buscas: ${JSON.stringify(queryList)} — refazendo busca ao vivo`);
         rc.del(cacheKey).catch(()=>{});
         throw new Error("EMPTY_CACHE_BUST");
       }
-      console.log(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
+      logger.debug(`Cache HIT para buscas: ${JSON.stringify(queryList)}`);
       if (!Array.isArray(parsed) && parsed._incomplete) resultsArr._incomplete = true;
       return resultsArr;
     } catch (err) {
@@ -686,8 +695,8 @@ async function jackettSearch(plan, indexers, prefs) {
   }
   const FAST_TIMEOUT = (prefs?.slowThreshold > 0 ? prefs.slowThreshold : 8000);
   const SLOW_TIMEOUT = 50000;
-  console.log(`Jackett iniciando busca: "${queryList[0] || plan?.search?.title || "sem titulo"}" em [${indexers.length} indexers]`);
-  console.log(`Fase rapida: aguardando respostas... (${FAST_TIMEOUT}ms max)`);
+  logger.info(`Busca: "${queryList[0] || plan?.search?.title || "sem titulo"}" em [${indexers.length} indexers]`);
+  logger.debug(`Fase rapida: aguardando respostas... (${FAST_TIMEOUT}ms max)`);
 
   const resultsByIndexer = new Map();
   let fastPhaseActive = true;
@@ -739,7 +748,7 @@ async function jackettSearch(plan, indexers, prefs) {
       15000,
       Math.max(2000, Number(prefs?.timeout) || FAST_TIMEOUT)
     );
-    console.log(`[Scrape] Janela rápida vazia; aguardando primeiro resultado por até ${emptyResultGraceMs}ms`);
+    logger.debug(`[Scrape] Janela rápida vazia; aguardando primeiro resultado por até ${emptyResultGraceMs}ms`);
     await Promise.race([
       Promise.all(searchPromises),
       firstResultPromise,
@@ -755,7 +764,7 @@ async function jackettSearch(plan, indexers, prefs) {
     fastDeduped._incomplete = true;
   }
   const t1 = Date.now();
-  console.log(`[Scrape] Conclusão da janela rápida em ${t1 - t0}ms: ${fastFlat.length} brutos -> ${fastDeduped.length} ${prefs.dedupe !== false ? 'deduplicados' : 'resultados'}`);
+  logger.info(`[Scrape] Janela rápida: ${fastFlat.length} brutos -> ${fastDeduped.length} ${prefs.dedupe !== false ? 'deduplicados' : 'resultados'} (${t1 - t0}ms)`);
   // Nunca cachear resultado VAZIO nem resultado incompleto com TTL longo:
   //  • vazio → próximo request refaz a busca ao vivo (evita "sem resultados" instantâneo);
   //  • incompleto → TTL curto para não servir falha parcial por horas.
@@ -773,7 +782,7 @@ async function jackettSearch(plan, indexers, prefs) {
       // timeout (resultsByIndexer.size === indexers.length) e o resultado é real.
       const complete = resultsByIndexer.size >= indexers.length;
       if (slowDeduped.length > fastDeduped.length && complete) {
-        console.log(`[Background] Conclusão total do scrape em ${t2 - t0}ms. Cache atualizado: ${fastDeduped.length} -> ${slowDeduped.length}`);
+        logger.debug(`[Background] Conclusão total do scrape em ${t2 - t0}ms. Cache atualizado: ${fastDeduped.length} -> ${slowDeduped.length}`);
         if (slowDeduped.length > 0) await rc.set(cacheKey, JSON.stringify({ _incomplete: false, results: slowDeduped }), 10800);
       } else if (complete && fastDeduped.length > 0) {
         if (fastDeduped.length > 0) await rc.set(cacheKey, JSON.stringify({ _incomplete: false, results: fastDeduped }), 10800);
@@ -855,7 +864,7 @@ async function getKitsuMeta(kitsuId) {
 }
 
 // Dependência de parseStreamId em parseRssItemId -> Vamos precisar das funçōes de rssHelpers aqui também ou importar?
-// Exportadas de rssHelpers.js: parseRssItemId. 
+// Exportadas de rssHelpers.js: parseRssItemId.
 // Vamos definir aqui para não haver cycle, ou colocar no module próprio.
 const { parseRssItemId } = require("./rssHelpers");
 
@@ -929,7 +938,7 @@ async function buildQueries(type, id) {
   const meta = await getCinemetaTitle(type, parsed.metaId);
   if (meta.isAnime) {
     parsed.isAnime = true;
-    console.log(`[Cinemeta] Anime detectado: "${meta.title}" — usando indexers e filtros de anime`);
+    logger.debug(`[Cinemeta] Anime detectado: "${meta.title}"`);
   }
   let queries;
   let episode = null;
@@ -994,7 +1003,7 @@ async function resolveSearchIndexers(prefs, isAnime) {
 
   const rawSelected = Array.isArray(prefs.indexers) ? prefs.indexers : String(prefs.indexers || "").split(",");
   let selected = rawSelected.map(s => String(s || "").trim()).filter(Boolean);
-  
+
   if (selected.length > 1 && selected.includes("all")) {
     selected = selected.filter(s => s !== "all");
   }
@@ -1023,4 +1032,12 @@ module.exports = { parseStreamId,
   buildQueries,
   resolveSearchIndexers,
   isProwlarrServer,
+  parseTorznabResults,
+  parseProwlarrResults,
+  normalizeProwlarrInfoHash,
+  prowlarrSearch,
+  prowlarrStructuredSearch,
+  titleMatchesEpisode,
+  filterBadMatches,
+  buildAnimeQueryFallsback,
 };

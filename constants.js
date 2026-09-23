@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const { isConfigured: qbitEnvConfigured } = require("./providers/qbittorrent");
+const logger = require("./logger");
+
 // Garante que uma URL pública sempre tenha protocolo. Um ADDON_PUBLIC_URL sem
 // esquema (ex.: "prowjack.example.com") quebrava o buildStremThruProxyManifestUrl,
 // gerando um upstream sem "https://" que o StremThru não conseguia buscar → buscas
@@ -27,10 +30,21 @@ const ENV = {
   ),
   enablePureP2P:   process.env.ENABLE_PURE_P2P !== "false",
   rssUpdateIntervalMinutes: parseInt(process.env.RSS_UPDATE_INTERVAL_MINUTES || "30", 10),
+  // Feature flags para a instância pública. Em produção não expõem funcionalidades
+  // experimentais (qBittorrent / Catálogo RSS) a menos que explicitamente ativadas.
+  // Backend também respeita essas flags, não apenas a UI.
+  enableQbit:   process.env.ENABLE_QBITTORRENT != null
+    ? String(process.env.ENABLE_QBITTORRENT).toLowerCase() !== "false"
+    : qbitEnvConfigured(),
+  enableRssCatalog: process.env.ENABLE_RSS_CATALOG != null
+    ? String(process.env.ENABLE_RSS_CATALOG).toLowerCase() !== "false"
+    : !!((process.env.RSS_CATALOG_INDEXERS || "").trim()),
   qbitConfig: {
     url:      (process.env.QBIT_URL || "").trim().replace(/\/+$/, ""),
-    username: (process.env.QBIT_USERNAME || "").trim(),
-    password: (process.env.QBIT_PASSWORD || "").trim(),
+    // Aceita tanto QBIT_USER/QBIT_PASS (histórico do projeto) quanto
+    // QBIT_USERNAME/QBIT_PASSWORD por compatibilidade.
+    username: (process.env.QBIT_USERNAME || process.env.QBIT_USER || "").trim(),
+    password: (process.env.QBIT_PASSWORD || process.env.QBIT_PASS || "").trim(),
     saveDir:  (process.env.QBIT_SAVE_DIR || "").trim()
   }
 };
@@ -51,7 +65,7 @@ const STREMTHRU_PROXY_TIMEOUT_MS = ENV.stremThruProxyTimeoutMs;
 const QB_EXTRA_SLOTS = parseInt(process.env.QB_EXTRA_SLOTS || "5", 10);
 const MIN_STREAM_SEEDS = 1;
 
-console.log(`[Config] QB_EXTRA_SLOTS = ${QB_EXTRA_SLOTS} (env: ${process.env.QB_EXTRA_SLOTS})`);
+logger.debug(`[Config] QB_EXTRA_SLOTS = ${QB_EXTRA_SLOTS} (env: ${process.env.QB_EXTRA_SLOTS})`);
 
 module.exports = {
   ENV,

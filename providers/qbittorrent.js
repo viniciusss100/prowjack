@@ -14,12 +14,13 @@ const QBIT_URL      = (process.env.QBIT_URL      || "").replace(/\/+$/, "");
 const QBIT_USER     = process.env.QBIT_USER     || "";
 const QBIT_PASS     = process.env.QBIT_PASS     || "";
 const QBIT_SAVE_DIR = process.env.QBIT_SAVE_DIR || path.join(require("os").tmpdir(), "prowjack-downloads");
+const logger = require("../logger");
 try {
   if (!fs.existsSync(QBIT_SAVE_DIR)) {
     fs.mkdirSync(QBIT_SAVE_DIR, { recursive: true });
   }
 } catch (e) {
-  console.warn("Aviso: não foi possível criar QBIT_SAVE_DIR:", e.message);
+  logger.warn(`Aviso: não foi possível criar QBIT_SAVE_DIR: ${e.message}`);
 }
 const QBIT_CATEGORY = process.env.QBIT_CATEGORY || "prowjack-private";
 const QBIT_TAGS     = process.env.QBIT_TAGS     || "prowjack";
@@ -82,7 +83,7 @@ async function qbitFetch(endpoint, options = {}, creds = null) {
     if (err.cause) err.message += ` (Cause: ${err.cause.code || err.cause.message})`;
     throw err;
   }
-  
+
   const setCookie = res.headers.get("set-cookie");
   if (setCookie) setSessionCookie(creds, setCookie.split(";")[0]);
   return res;
@@ -135,7 +136,7 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
   try {
     enrichedBuffer = injectTrackers(torrentBuffer);
   } catch (e) {
-    console.warn(`[qBit] injectTrackers falhou (usando original): ${e.message}`);
+    logger.warn(`[qBit] injectTrackers falhou (usando original): ${e.message}`);
     enrichedBuffer = torrentBuffer;
   }
 
@@ -159,7 +160,7 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
     `${infoHash}.torrent`
   );
 
-  console.log(`[qBit] Enviando .torrent (original=${torrentBuffer.length}b enriquecido=${enrichedBuffer.length}b) para ${infoHash}...`);
+  logger.debug(`[qBit] Enviando .torrent (${enrichedBuffer.length}b) para ${infoHash}...`);
 
   // Não definimos Content-Type nos headers — o fetch nativo detecta FormData e
   // define automaticamente: "multipart/form-data; boundary=----FormBoundary..."
@@ -169,7 +170,7 @@ async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
   }, creds);
 
   const text = await res.text();
-  console.log(`[qBit] Resposta add (buffer): ${text} (status=${res.status})`);
+  logger.debug(`[qBit] Resposta add (buffer): ${text} (status=${res.status})`);
 
   if (res.status >= 400) {
     throw new Error(`Erro API qBit (${res.status}): ${text}`);
@@ -213,14 +214,14 @@ async function addMagnet(infoHash, magnet, creds = null) {
     paused: "false",
   });
 
-  console.log(`[qBit] Enviando magnet para ${infoHash}...`);
+  logger.debug(`[qBit] Enviando magnet para ${infoHash}...`);
   const res = await qbitApi("/api/v2/torrents/add", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
   }, creds);
   const text = await res.text();
-  console.log(`[qBit] Resposta add (magnet): ${text} (status=${res.status})`);
+  logger.debug(`[qBit] Resposta add (magnet): ${text} (status=${res.status})`);
 
   if (res.status >= 400) {
     throw new Error(`Erro API qBit (${res.status}): ${text}`);
@@ -253,7 +254,7 @@ async function getTorrentInfo(infoHash, creds = null) {
     const list = await res.json();
     return Array.isArray(list) && list.length ? list[0] : null;
   } catch (err) {
-    console.error(`[qBit] Erro ao buscar info do torrent ${infoHash}: ${err.message}`);
+    logger.warn(`[qBit] Erro ao buscar info do torrent ${infoHash}: ${err.message}`);
     return null;
   }
 }
@@ -312,10 +313,10 @@ async function ensureTorrentReady(infoHash, options = {}) {
   let info = await getTorrentInfo(infoHash, creds);
   if (!info) {
     if (torrentBuffer) {
-      console.log(`[qBit] Adicionando via .torrent buffer para ${infoHash}...`);
+      logger.debug(`[qBit] Adicionando via .torrent buffer para ${infoHash}...`);
       await addTorrentBuffer(infoHash, torrentBuffer, creds);
     } else if (magnet) {
-      console.log(`[qBit] Adicionando via magnet para ${infoHash}...`);
+      logger.debug(`[qBit] Adicionando via magnet para ${infoHash}...`);
       await addMagnet(infoHash, magnet, creds);
     } else {
       throw new Error(
@@ -324,7 +325,7 @@ async function ensureTorrentReady(infoHash, options = {}) {
       );
     }
   } else {
-    console.log(`[qBit] Torrent ${infoHash} já existe no qBittorrent (state=${info.state})`);
+    logger.debug(`[qBit] Torrent ${infoHash} já existe (state=${info.state})`);
   }
 
   const deadline = Date.now() + 30000;
@@ -355,7 +356,7 @@ async function waitForBuffer(infoHash, fileIdx, fileName, creds = null) {
     if (!target) { await sleep(POLL_INTERVAL); continue; }
 
     const progress = Number(target.progress || 0);
-    console.log(`[qBit] ${infoHash} | arquivo=${target.name} | ${(progress * 100).toFixed(1)}% | estado=${info.state}`);
+    logger.debug(`[qBit] ${infoHash} | arquivo=${target.name} | ${(progress * 100).toFixed(1)}%`);
 
     if (progress >= MIN_PROGRESS) return { info, file: target };
 
@@ -413,16 +414,16 @@ function resolveFilePath(info, file) {
   }
 
   const checkExists = (p) => {
-    if (DEBUG_QBIT) console.log(`[qBit-Debug] Verificando existência de: ${p}`);
+    if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] Verificando: ${p}`);
     if (fs.existsSync(p)) return p;
     if (fs.existsSync(p + ".!qB")) return p + ".!qB";
-    if (DEBUG_QBIT) console.log(`[qBit-Debug] -> NÃO ENCONTRADO`);
+    if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] -> NÃO ENCONTRADO`);
     return null;
   };
 
   if (DEBUG_QBIT) {
-    console.log(`[qBit-Debug] resolveFilePath iniciado. relative=${relative}`);
-    console.log(`[qBit-Debug] info.content_path=${info.content_path}, info.name=${info.name}`);
+    if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] resolveFilePath relative=${relative}`);
+    if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] content_path=${info.content_path}`);
   }
 
   // 1ª tentativa: caminho direto em QBIT_SAVE_DIR (ex: arquivo avulso)
@@ -441,7 +442,7 @@ function resolveFilePath(info, file) {
   const root = mapPath(info.content_path) || path.join(QBIT_SAVE_DIR, info.name || "");
   const normalizedRoot = path.normalize(root);
   const normalizedRelative = path.normalize(relative);
-  
+
   let finalPath;
   if (normalizedRoot.endsWith(normalizedRelative)) {
     // Torrent de arquivo único onde content_path já é o arquivo
@@ -457,12 +458,12 @@ function resolveFilePath(info, file) {
     }
   }
 
-  if (DEBUG_QBIT) console.log(`[qBit-Debug] 3a tentativa rootBase=${path.basename(normalizedRoot)} finalPath=${finalPath}`);
+  if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] rootBase=${path.basename(normalizedRoot)} finalPath=${finalPath}`);
 
   const res3 = checkExists(finalPath);
   if (res3) return res3;
 
-  if (DEBUG_QBIT) console.log(`[qBit-Debug] FALHA TOTAL. Retornando null`);
+  if (DEBUG_QBIT || logger.level === "debug") logger.debug(`[qBit] FALHA TOTAL. Retornando null`);
   return null; // Mudança importante: retornar null se não encontrar em vez de string falsa
 }
 
@@ -507,12 +508,12 @@ async function streamTorrentFile(req, res, infoHash, fileIdx, fileName, creds = 
     }
 
     if (!Number.isFinite(start) || start < 0) return res.status(416).end();
-    
+
     // Removemos a restrição de availableBytes porque o qBittorrent baixa o final do arquivo primeiro (firstLastPiecePrio).
     // Se limitarmos pelo percentual de progresso, o player recebe 503 ao tentar ler os metadados no final do .mkv.
     const parsedEnd = parts[1] ? parseInt(parts[1], 10) : null;
     if (parts[1] && (!Number.isFinite(parsedEnd) || parsedEnd < start)) return res.status(416).end();
-    
+
     // Chunk requests to avoid reading too far ahead and hitting zeroes
     const requestedEnd = parsedEnd != null ? parsedEnd : Math.min(start + 5 * 1024 * 1024, fileSize - 1);
     const safeEnd      = Math.min(requestedEnd, fileSize - 1);

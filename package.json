@@ -1,11 +1,14 @@
 {
   "name": "prowjack",
-  "version": "3.3.1",
+  "version": "3.3.2",
   "description": "Qbittorrent+Prowlarr/Jackett+Debrid",
   "main": "addon.js",
   "scripts": {
     "start": "node addon.js",
-    "dev": "nodemon addon.js"
+    "dev": "nodemon addon.js",
+    "lint": "eslint . --max-warnings=0",
+    "test": "PROJACK_REDIS_DISABLED=1 node --test \"test/**/*.test.js\"",
+    "build": "node scripts/build-check.js"
   },
   "dependencies": {
     "axios": "^1.7.0",

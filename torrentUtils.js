@@ -2,10 +2,10 @@
 const crypto = require("crypto");
 const axios  = require("axios");
 const { rc } = require("./cache");
-const { 
-  animeEpisodeMatchRank, 
-  episodeMatchRank, 
-  normalizeTitleTokens 
+const logger = require("./logger");
+const {
+  animeEpisodeMatchRank,
+  episodeMatchRank
 } = require("./scoring");
 
 // Constante definida no addon, mas trazemos para cá para falhas
@@ -60,7 +60,7 @@ function extractInfoBuf(buf) {
     } else i++;
   }
   if (iterations >= maxIterations) {
-    console.warn("[SECURITY] extractInfoBuf: loop excessivo detectado");
+    logger.warn("[SECURITY] extractInfoBuf: loop excessivo detectado");
     return null;
   }
   return depth === 0 ? buf.slice(start, i) : null;
@@ -124,7 +124,7 @@ function extractTorrentFiles(buf) {
       return [{ idx: 0, name: String(info.name), size: Number(info.length) || 0 }];
     }
   } catch (err) {
-    console.warn(`[WARN] Falha ao extrair arquivos do torrent: ${err.message}`);
+    logger.warn(`[WARN] Falha ao extrair arquivos do torrent: ${err.message}`);
   }
   return [];
 }
@@ -149,7 +149,7 @@ function pickEpisodeFile(files, season, episode, isAnime) {
     const fallback = scoreFiles((name) => episodeMatchRank(name, season, episode));
     if (fallback.length) {
       fallback.sort((a, b) => b.total - a.total);
-      console.log(`[FILE] pickEpisodeFile: match via fallback SxxExx para anime S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")} → "${fallback[0].name}"`);
+      logger.debug(`[FILE] pickEpisodeFile: match via fallback SxxExx para anime S${String(season).padStart(2,"0")}E${String(episode).padStart(2,"0")} → "${fallback[0].name}"`);
       return fallback[0];
     }
   }
@@ -251,7 +251,7 @@ class InfoHashQueue {
       this.running++;
 
       resolveInfoHash(task.r, { ...task.reqCtx, waitForDownload: true })
-        .catch(err => console.warn(`[InfoHashQueue] Falha ao resolver infoHash: ${err.message}`))
+        .catch(err => logger.warn(`[InfoHashQueue] Falha ao resolver infoHash: ${err.message}`))
         .finally(() => {
           this.running--;
           this.runningKeys.delete(task.key);
@@ -290,7 +290,7 @@ async function resolveInfoHash(r, reqCtx = {}) {
     try {
       let cachedHashStr = guidHashKey ? await rc.get(guidHashKey) : null;
       if (!cachedHashStr) cachedHashStr = await rc.get(urlHashKey);
-      
+
       if (cachedHashStr) {
         let cachedHash = cachedHashStr;
         let isPrivate;
@@ -310,7 +310,7 @@ async function resolveInfoHash(r, reqCtx = {}) {
       }
     } catch {}
 
-    if (reqCtx.fastOnly) return null; 
+    if (reqCtx.fastOnly) return null;
 
     let downloadPromise = activeDownloads.get(urlHashKey);
     if (!downloadPromise) {
@@ -373,7 +373,7 @@ async function resolveInfoHash(r, reqCtx = {}) {
             await markTorrentDownloadFailed(r);
             const indexerMatch = httpLink.match(/https?:\/\/[^\/]+\/([^\/]+)\/download/);
             const idxId = indexerMatch ? `Indexador ${indexerMatch[1]}` : httpLink.slice(0,40)+'...';
-            console.warn(`[WARN] Falha ao baixar torrent (${idxId}): ${err.message}`);
+            logger.warn(`[WARN] Falha ao baixar torrent (${idxId}): ${err.message}`);
           }
           return magnetHash ? { infoHash: magnetHash, files: null, buffer: null, isPrivate: false } : null;
         } finally {
@@ -390,11 +390,11 @@ async function resolveInfoHash(r, reqCtx = {}) {
     const timeoutMs = reqCtx.stremthruMode ? 14000 : 6000;
     const timeoutPromise = new Promise(resolve => setTimeout(() => resolve("TIMEOUT"), timeoutMs));
     const result = await Promise.race([downloadPromise, timeoutPromise]);
-    
+
     if (result === "TIMEOUT") {
       const indexerMatch = httpLink.match(/https?:\/\/[^\/]+\/([^\/]+)\/download/);
       const idxId = indexerMatch ? `Indexador ${indexerMatch[1]}` : httpLink.slice(0,50)+'...';
-      console.warn(`[WARN] Timeout ${Math.round(timeoutMs/1000)}s atingido em resolveInfoHash para ${idxId} (Download continua em background)`);
+      logger.warn(`[WARN] Timeout ${Math.round(timeoutMs/1000)}s atingido em resolveInfoHash para ${idxId} (Download continua em background)`);
       reqCtx.hasTimedOut = true;
       return magnetHash ? { infoHash: magnetHash, files: null, buffer: null, isPrivate: false } : null;
     }

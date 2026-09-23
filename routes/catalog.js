@@ -7,11 +7,12 @@ const { loadRssItemsForType, rssCatalogMetaId, parseRssMetaId, extractSeriesFeed
 const { normalizeImdbId } = require("../scoring");
 const { enrichMetaPtBr } = require("../metadata");
 const { CATALOG_KEY } = require("../rssPoller");
+const logger = require("../logger");
 
 const router = express.Router();
 
 router.get("/:userConfig/catalog/:type/:id.json", async (req, res) => {
-  const { type, id } = req.params;
+  const { id } = req.params;
   const prefs = await resolvePrefs(req.params.userConfig);
   const catalogTypeMap = {
     prowjack_rss_movie:  "movie",
@@ -147,7 +148,7 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
       }
     }
 
-    console.log(`[Meta] ${rssMeta.metaId}: ${matchedRssItems.length} itens RSS → marcadores: [${[...availableEps].join(", ")}]`);
+    logger.debug(`[Meta] ${rssMeta.metaId}: ${matchedRssItems.length} itens RSS`);
 
     // ── PASSO 3: Filtrar episódios do Cinemeta e remalear IDs para rssitem: ──
     const cinemetaVideos = baseMeta.videos || [];
@@ -157,7 +158,7 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
       // Nenhum item RSS encontrado para esta série ainda.
       // Retornar meta sem episódios mas com poster/nome para não quebrar o catálogo.
       videos = [];
-      console.log(`[Meta] ${rssMeta.metaId}: nenhum episódio RSS disponível`);
+      logger.debug(`[Meta] ${rssMeta.metaId}: nenhum episódio RSS disponível`);
     } else {
       videos = cinemetaVideos
         .filter(v => {
@@ -179,7 +180,7 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
 
         if (cinemetaVideos.length === 0) {
           // Cinemeta não tem NENHUM episódio (série nova / fora do catálogo) → RSS puro
-          console.log(`[Meta] ${rssMeta.metaId}: Cinemeta sem episódios → usando RSS`);
+          logger.debug(`[Meta] ${rssMeta.metaId}: Cinemeta sem episódios → usando RSS`);
           videos = rssVideos;
         } else {
           // Cinemeta tem episódios de outra(s) temporada(s) e o RSS tem temporada mais nova
@@ -192,13 +193,13 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
             .map(v => ({ ...v, id: `rssitem:${rssMeta.catalogType}:${rssMeta.metaId}:${v.season}:${v.episode}` }));
           videos = [...cinemetaOther, ...rssVideos]
             .sort((a, b) => (a.season - b.season) || (a.episode - b.episode));
-          console.log(`[Meta] ${rssMeta.metaId}: temporada RSS mais recente → merge ${cinemetaOther.length} Cinemeta + ${rssVideos.length} RSS`);
+          logger.debug(`[Meta] ${rssMeta.metaId}: temporada RSS mais recente → merge`);
         }
       }
 
       const rssCount   = videos.filter(v => String(v.id).startsWith("rssitem:")).length;
       const totalCount = videos.length;
-      console.log(`[Meta] ${rssMeta.metaId}: ${totalCount} eps disponíveis (${rssCount} via RSS, ${totalCount - rssCount} via Cinemeta)`);
+      logger.debug(`[Meta] ${rssMeta.metaId}: ${totalCount} eps (${rssCount} RSS)`);
     }
 
     // Sem nome e sem episódios = não há o que mostrar
@@ -215,7 +216,7 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
       }
     });
   } catch (err) {
-    console.error(`[Meta] Erro: ${err.message}`);
+    logger.warn(`[Meta] Erro: ${err.message}`);
     return res.json({ meta: null });
   }
 });

@@ -28,8 +28,6 @@ const funcsToRemove = new Set([
 const ast = acorn.parse(code, { ecmaVersion: 2022, sourceType: 'script' });
 let extractedFuncs = [];
 let nodesToRemove = [];
-
-let hasMemoryStore = false;
 for (const node of ast.body) {
   if (node.type === 'FunctionDeclaration' && node.id) {
     if (helpersToExtract.has(node.id.name)) {
@@ -43,7 +41,6 @@ for (const node of ast.body) {
     for (const decl of node.declarations) {
       if (decl.id && decl.id.type === 'Identifier' && decl.id.name === 'memoryStore') {
          shouldRemove = true; // the ratelimit memory store
-         hasMemoryStore = true;
       }
     }
     if (shouldRemove) {

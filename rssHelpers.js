@@ -19,7 +19,7 @@ async function loadRssItemsForType(prefs, rssType) {
     ? await Promise.all(allowedRss.map(ix => rc.keys(`rss:${CACHE_VERSION}:${ix}:${rssType}:*`))).then(a => a.flat())
     : await rc.keys(`rss:${CACHE_VERSION}:*:${rssType}:*`);
   if (!keys.length) return [];
-  
+
   const items = (await Promise.all(keys.map(async key => {
     try {
       const raw = await rc.get(key);

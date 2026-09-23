@@ -1,12 +1,13 @@
 const express = require("express");
 const { resolvePrefs } = require("../configStore");
 const { getPublicBase } = require("../routeHelpers");
+const { ENV } = require("../constants");
 
 const router = express.Router();
 
 router.get("/manifest.json", (req, res) => {
   res.json({
-    id: "org.prowjack.pro", version: "3.3.1", name: "ProwJack",
+    id: "org.prowjack.pro", version: "3.3.2", name: "ProwJack",
     logo: `${getPublicBase(req)}/logo.svg`,
     icon: `${getPublicBase(req)}/logo.svg`,
     description: "Qbittorrent+Prowlarr/Jackett+Debrid+Filtros por keywords",
@@ -24,7 +25,7 @@ router.get("/internal/:userConfig/manifest.json", async (req, res) => {
     const types = [...new Set((prefs.categories || ["movie", "series"]).map(c => c === "movies" ? "movie" : c === "anime" ? "series" : c))];
     res.json({
       id: `org.prowjack.internal.${req.params.userConfig}`,
-      version: "3.3.1",
+      version: "3.3.2",
       name: `${name} Internal`,
       description: "Upstream interno do ProwJack para StremThru",
       logo: `${getPublicBase(req)}/logo.svg`,
@@ -34,7 +35,7 @@ router.get("/internal/:userConfig/manifest.json", async (req, res) => {
       behaviorHints: { configurable: false, configurationRequired: false },
     });
   } catch (err) {
-    res.json({ id: `org.prowjack.internal.err`, version: "3.3.1", name: "ProwJack Internal (Error)", resources: [], types: [], catalogs: [] });
+    res.json({ id: `org.prowjack.internal.err`, version: "3.3.2", name: "ProwJack Internal (Error)", resources: [], types: [], catalogs: [] });
   }
 });
 
@@ -51,14 +52,15 @@ router.get("/:userConfig/manifest.json", async (req, res) => {
   const enabledCats = Array.isArray(prefs.categories) && prefs.categories.length ? prefs.categories : ["movie", "series"];
   const catalogs = [];
   const catalogFilter = (process.env.RSS_CATALOG_INDEXERS || "").trim();
-  // O catálogo aparece apenas se enableCatalog=true E a variável de ambiente estiver configurada
-  if (prefs.enableCatalog && catalogFilter) {
+  // O catálogo aparece apenas se enableCatalog=true E a variável de ambiente estiver
+  // configurada E a feature flag ENABLE_RSS_CATALOG não desabilitar o recurso.
+  if (ENV.enableRssCatalog && prefs.enableCatalog && catalogFilter) {
     if (enabledCats.includes("movie"))  catalogs.push({ type: "movie",  id: "prowjack_rss_movie",  name: `${name} - Recentes`, extra: [{ name: "skip", isRequired: false }] });
     if (enabledCats.includes("series")) catalogs.push({ type: "series", id: "prowjack_rss_series", name: `${name} - Recentes`, extra: [{ name: "skip", isRequired: false }] });
   }
 
   res.json({
-    id: "org.prowjack.pro", version: "3.3.1", name,
+    id: "org.prowjack.pro", version: "3.3.2", name,
     logo: `${getPublicBase(req)}/logo.svg`,
     icon: `${getPublicBase(req)}/logo.svg`,
     description: "Qbittorrent+Prowlarr/Jackett+Debrid+Filtros por keywords",

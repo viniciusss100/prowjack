@@ -95,6 +95,8 @@ function extractInfoRaw(buf) {
 
 let DYNAMIC_TRACKERS = [...EXTRA_TRACKERS];
 const axios = require("axios");
+const logger = require("./logger");
+let trackersUpdating = null;
 
 async function updateDynamicTrackers() {
   const urls = [
@@ -109,7 +111,7 @@ async function updateDynamicTrackers() {
         const trackers = res.data.split("\n").map(t => t.trim()).filter(Boolean);
         if (trackers.length > 0) {
           DYNAMIC_TRACKERS = [...new Set([...EXTRA_TRACKERS, ...trackers])];
-          console.log(`[torrentEnrich] Trackers atualizados: ${DYNAMIC_TRACKERS.length} no total`);
+          logger.info(`[torrentEnrich] Trackers atualizados: ${DYNAMIC_TRACKERS.length} no total`);
           return;
         }
       }
@@ -117,15 +119,27 @@ async function updateDynamicTrackers() {
   }
 }
 
-// Start background update
-updateDynamicTrackers().catch(() => {});
-setInterval(updateDynamicTrackers, 12 * 60 * 60 * 1000);
+// Atualização Lazy (primeira injeção) em vez de fetch no boot: em serverless isso
+// evita uma chamada externa em todo cold start e impede processos de teste de
+// ficarem pendurados aguardando rede. O intervalo usa .unref() para nunca manter
+// o processo vivo sozinho.
+function scheduleTrackerUpdate() {
+  if (!trackersUpdating) {
+    trackersUpdating = updateDynamicTrackers().catch(() => {}).finally(() => { trackersUpdating = null; });
+  }
+}
+
+setInterval(scheduleTrackerUpdate, 12 * 60 * 60 * 1000).unref();
 
 function injectTrackers(buffer, extraTrackers = null) {
-  if (!extraTrackers) extraTrackers = DYNAMIC_TRACKERS;
+  if (!extraTrackers) {
+    extraTrackers = DYNAMIC_TRACKERS;
+    // Primeira injeção: dispara atualização assíncrona das listas públicas.
+    scheduleTrackerUpdate();
+  }
   try {
     if (!Buffer.isBuffer(buffer) || buffer.length > MAX_TORRENT_SIZE) {
-      if (buffer?.length > MAX_TORRENT_SIZE) console.warn(`[torrentEnrich] Torrent muito grande (${buffer.length} bytes), ignorando enriquecimento`);
+      if (buffer?.length > MAX_TORRENT_SIZE) logger.warn(`[torrentEnrich] Torrent muito grande (${buffer.length} bytes), ignorando enriquecimento`);
       return buffer;
     }
     const torrent = bdecode(buffer, 0).value;
@@ -159,7 +173,7 @@ function injectTrackers(buffer, extraTrackers = null) {
 
     return bencode(newTorrent);
   } catch (e) {
-    console.error(`[torrentEnrich] Erro: ${e.message}`);
+    logger.warn(`[torrentEnrich] Erro: ${e.message}`);
     return buffer;
   }
 }
@@ -182,8 +196,8 @@ function extractTrackers(buffer) {
   } catch { return []; }
 }
 
-module.exports = { 
-  injectTrackers, 
-  extractTrackers, 
+module.exports = {
+  injectTrackers,
+  extractTrackers,
   get EXTRA_TRACKERS() { return DYNAMIC_TRACKERS; }
 };

@@ -1,3 +1,4 @@
+const logger = require("./logger");
 "use strict";
 
 // ╔════════════════════════════════════════════════════════════════════╗
@@ -455,7 +456,7 @@ function matchesKeywordBoost(title, boostFilter) {
   const pattern = boostFilter.trim();
   if (pattern.length > 500) return false;
   if (REDOS_SUSPICIOUS.test(pattern)) {
-    console.warn(`[SECURITY] ReDoS-suspeito bloqueado: ${pattern.slice(0, 80)}`);
+    logger.warn(`[SECURITY] ReDoS-suspeito bloqueado: ${pattern.slice(0, 80)}`);
     return false;
   }
   try {
@@ -486,10 +487,6 @@ function textHasAnyTerm(text, terms) {
     if (/^\d+$/.test(term)) return new RegExp(`(?:^|\\s)${term}(?:\\s|$)`).test(hay);
     return hay.includes(term);
   });
-}
-
-function escapeRegex(str) {
-  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function resultIndexerText(r, indexerName = "") {
@@ -543,8 +540,11 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = t
     if (sizeMatch) size = sizeMatch[1].toUpperCase().replace(/\s+/g, '').replace(/I/g, 'i');
   }
   const seeds = r._displaySeeds ?? r.Seeders ?? 0;
-  const cleanIndexer = renameIndexer(indexerName);
   const addonName = prefs.addonName || "ProwJack";
+  const cleanIndexer = (renameIndexer(indexerName) || "").trim();
+  // O nome do stream permanece com o nome do addon (ProwJack) no topo.
+  // A fonte real (indexador) fica descrita na linha ⚙️ da descrição e no
+  // campo `indexer`, para que scrapers externos identifiquem a origem.
 
   const resMap = {
     "2160p": "🟣 4K",
@@ -578,7 +578,7 @@ function formatStream(r, indexerName, isAnime = false, prefs = {}, showSeeds = t
     [group ? `${brGroup}🫟 ${group}` : "", cleanIndexer ? `⚙️ ${cleanIndexer}` : ""].filter(Boolean).join("  "),
   ].filter(Boolean).join("\n");
 
-  const result = { name: `${addonName}\n${resLabel}`, description: desc.trim(), resLabel };
+  const result = { name: `${addonName}\n${resLabel}`, description: desc.trim(), resLabel, indexer: cleanIndexer || "" };
   return result;
 }
 

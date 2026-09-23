@@ -84,6 +84,9 @@ router.get("/api/env", async (_, res) => {
     isProwlarr: isProwlarr === true,
     serverType: isProwlarr === true ? "prowlarr" : isProwlarr === false ? "jackett" : "unknown",
     qbitConfigured: isQbitConfigured(),
+    // Feature flags expostas para a UI decidir o que exibir/ocultar.
+    enableQbit: ENV.enableQbit,
+    enableRssCatalog: ENV.enableRssCatalog,
     redisOk,
     port: ENV.port,
     accessProtected: !!ENV.accessToken,

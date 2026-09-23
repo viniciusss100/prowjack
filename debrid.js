@@ -2,6 +2,7 @@
 
 const axios = require("axios");
 const { injectTrackers } = require("./torrentEnrich");
+const logger = require("./logger");
 
 function buildMagnet(infoHash, existingMagnet, title) {
   if (existingMagnet && existingMagnet.startsWith("magnet:")) return existingMagnet;
@@ -29,7 +30,7 @@ function buildMagnet(infoHash, existingMagnet, title) {
 function logRdAddFailure(stage, res) {
   const status = res?.status || "sem status";
   const data = typeof res?.data === "string" ? res.data : JSON.stringify(res?.data || {});
-  console.log(`[RD] ${stage} falhou: HTTP ${status} ${data.slice(0, 500)}`);
+  logger.warn(`[RD] ${stage} falhou: HTTP ${status} ${data.slice(0, 500)}`);
 }
 
 // ╔════════════════════════════════════════════════════════════════════╗
@@ -66,7 +67,7 @@ async function rdDeleteTorrent(id, key) {
 
 async function rdAddTorrent(magnet, key, buffer = null) {
   const headersAuth = { Authorization: `Bearer ${key}` };
-  
+
   try {
     if (buffer) {
       const enriched = injectTrackers(buffer);
@@ -82,7 +83,7 @@ async function rdAddTorrent(magnet, key, buffer = null) {
       if (!res.data?.id) logRdAddFailure("addTorrent", res);
       return !!res.data?.id;
     }
-    
+
     const res = await axios.post(
       "https://api.real-debrid.com/rest/1.0/torrents/addMagnet",
       `magnet=${encodeURIComponent(magnet)}`,
@@ -131,7 +132,7 @@ async function rdListDownloadedHashes(hashes, headersAuth) {
         validateStatus: s => s < 500,
       });
       if (listRes.status >= 400 || !Array.isArray(listRes.data)) {
-        console.log(`[RD] torrents list fallback falhou: HTTP ${listRes.status}`);
+        logger.warn(`[RD] torrents list fallback falhou: HTTP ${listRes.status}`);
         break;
       }
       for (const torrent of listRes.data) {
@@ -143,7 +144,7 @@ async function rdListDownloadedHashes(hashes, headersAuth) {
       if (listRes.data.length < 100) break;
     }
   } catch (err) {
-    console.log(`[RD] torrents list fallback falhou (${err.response?.status || err.message})`);
+    logger.warn(`[RD] torrents list fallback falhou (${err.response?.status || err.message})`);
   }
   return resultMap;
 }
@@ -160,13 +161,13 @@ async function rdBatchCheckCache(hashes, key, bufferMap = {}, privateHashes = ne
     const normalized = String(h || "").toLowerCase();
     if (/^[0-9a-f]{40}$/.test(normalized)) uniqueHashes.add(normalized);
   }
-  
-  console.log(`[RD] rdBatchCheckCache: ${uniqueHashes.size} hashes únicos, ${privateHashes.size} privados`);
+
+  logger.debug(`[RD] rdBatchCheckCache: ${uniqueHashes.size} hashes únicos, ${privateHashes.size} privados`);
   if (!uniqueHashes.size) return {};
 
   const headersAuth = { Authorization: `Bearer ${key}` };
   const resultMap = await rdListDownloadedHashes([...uniqueHashes], headersAuth);
-  console.log(`[RD] conta: ${Object.keys(resultMap).length} cached`);
+  logger.debug(`[RD] conta: ${Object.keys(resultMap).length} cached`);
   return resultMap;
 }
 
@@ -174,7 +175,6 @@ async function rdGetDirectLink(hash, magnet, fileIds, key, torrentBuffer = null)
   const headersAuth = { Authorization: `Bearer ${key}` };
   let torrentId;
   let isExisting = false;
-  let links = null;
 
   const existing = await rdFindExistingTorrent(hash, key);
 
@@ -244,7 +244,7 @@ async function rdGetDirectLink(hash, magnet, fileIds, key, torrentBuffer = null)
       return { download: dl };
     }
   } catch {}
-  
+
   return null;
 }
 
@@ -269,9 +269,9 @@ async function torboxAddTorrent(magnet, key, waitForReady = false, buffer = null
       }
     );
     if (!res.data?.data?.torrent_id) {
-      console.log(`[TorBox] Falha ao adicionar ${buffer ? "upload de arquivo" : "magnet"}: ${res.status}`);
+      logger.warn(`[TorBox] Falha ao adicionar ${buffer ? "upload de arquivo" : "magnet"}: ${res.status}`);
       if (buffer && magnet && !isFallback) {
-        console.log(`[TorBox] Tentando fallback com magnet...`);
+        logger.debug(`[TorBox] Tentando fallback com magnet...`);
         return torboxAddTorrent(magnet, key, waitForReady, null, { ...options, isFallback: true });
       }
       return null;
@@ -290,9 +290,9 @@ async function torboxAddTorrent(magnet, key, waitForReady = false, buffer = null
 
     return await torboxGetTorrentInfo(torrentId, key);
   } catch (err) {
-    console.error(`[TorBox] Exception ao adicionar torrent: ${err.message}`);
+    logger.warn(`[TorBox] Exception ao adicionar torrent: ${err.message}`);
     if (buffer && magnet && !isFallback) {
-      console.log(`[TorBox] Exception no upload de arquivo, tentando fallback com magnet...`);
+      logger.debug(`[TorBox] Exception no upload de arquivo, tentando fallback com magnet...`);
       return torboxAddTorrent(magnet, key, waitForReady, null, { ...options, isFallback: true });
     }
     return null;
@@ -338,7 +338,7 @@ async function torboxRequestDL(torrentId, fileId, key, source = "torrent") {
     const res = await axios.get(endpoint, { params, timeout: 10000 });
     return res.data?.data || null;
   } catch (err) {
-    console.error(`[TorBox] requestdl erro (id=${torrentId} file=${fileId}): ${err.message}`);
+    logger.warn(`[TorBox] requestdl erro (id=${torrentId} file=${fileId}): ${err.message}`);
     return null;
   }
 }
@@ -381,10 +381,10 @@ async function torboxBatchCheckCache(hashes, key, privateHashes = new Set()) {
       }
     }
 
-    console.log(`[TorBox] checkcached: ${Object.keys(resultMap).length} cached`);
+    logger.debug(`[TorBox] checkcached: ${Object.keys(resultMap).length} cached`);
     return resultMap;
   } catch (err) {
-    console.error(`[TorBox] Erro no cache check: ${err.message}`);
+    logger.warn(`[TorBox] Erro no cache check: ${err.message}`);
     return {};
   }
 }
@@ -412,7 +412,7 @@ async function resolveDebridStream(
       const rdStream = await resolveRDStream(infoHash, magnet, season, episode, isAnime, rdKey, files, rdCache || {}, buffer);
       if (rdStream) results.push({ ...rdStream, provider: "Real-Debrid" });
     }
-    
+
     if (torboxKey) {
       const tbStream = await resolveTBStream(infoHash, magnet, season, episode, isAnime, torboxKey, files, tbCache || false, buffer);
       if (tbStream) results.push({ ...tbStream, provider: "TorBox" });
@@ -437,7 +437,6 @@ async function resolveDebridStream(
 
 async function resolveRDStream(infoHash, magnet, season, episode, isAnime, key, files, cache, buffer) {
   if (!infoHash) return null;
-  const headersAuth = { Authorization: `Bearer ${key}` };
 
   if (!cache || !cache.rd || !cache.rd.length) {
     const isPrivate = buffer && !magnet;
@@ -538,10 +537,10 @@ function pickTBFile(variant, season, episode, isAnime) {
 
 function findBestFileMatch(variant, season, episode, isAnime) {
   const entries = Object.entries(variant);
-  
+
   for (const [id, file] of entries) {
     const name = file.filename || file.name || "";
-    
+
     if (isAnime) {
       const epMatch = name.match(new RegExp(`[-\\s]0*${episode}(?:v\\d+)?[\\s\\[\\(]`, "i"));
       if (epMatch) return { id, ...file };

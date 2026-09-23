@@ -2,15 +2,22 @@ const express = require("express");
 const crypto = require("crypto");
 const axios = require("axios");
 const { isConfigured: isQbitConfigured, ensureTorrentReady, getPlayableLocalFile, streamTorrentFile, waitForBuffer } = require("../providers/qbittorrent");
-const { TORRENT_DOWNLOAD_TIMEOUT_MS } = require("../constants");
+const { TORRENT_DOWNLOAD_TIMEOUT_MS, ENV } = require("../constants");
 const { rc, loadQbitJob } = require("../cache");
 const { resolvePrefs } = require("../configStore");
 const { isQbitEnabledForPrefs } = require("../routeHelpers");
 const { torrentDownloadRecentlyFailed, markTorrentDownloadFailed } = require("../torrentUtils");
 const { torboxAddTorrent, resolveDebridStream, rdAddTorrent } = require("../debrid");
 const { injectTrackers } = require("../torrentEnrich");
+const logger = require("../logger");
 
 const router = express.Router();
+
+// Proteção em nível de servidor: se a feature flag desabilitar qBittorrent, os
+// endpoints de streaming local não devem ser acessíveis mesmo que conhecidos.
+function qbitFeatureEnabled() {
+  return ENV.enableQbit === true;
+}
 
 router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   const { provider, infoHash } = req.params;
@@ -49,7 +56,7 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   // Download do .torrent se disponível (cache primeiro, link como fallback)
   let torrentBuffer = await rc.getBuffer(`torrent:${infoHash.toLowerCase()}`).catch(() => null);
   if (torrentBuffer) {
-    console.log(`[ON-DEMAND] Buffer .torrent recuperado do cache para ${infoHash}`);
+    logger.debug(`[ON-DEMAND] Buffer .torrent do cache para ${infoHash}`);
   }
 
   if (!torrentBuffer && typeof linkUrl === "string" && linkUrl.startsWith("http")) {
@@ -74,7 +81,7 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
     } catch(e) {
       if (!e.message.includes("magnet")) {
         await markTorrentDownloadFailed(linkUrl);
-        console.log(`[ON-DEMAND] Falha ao baixar .torrent: ${e.message}`);
+        logger.warn(`[ON-DEMAND] Falha ao baixar .torrent: ${e.message}`);
       }
     }
   }
@@ -84,7 +91,7 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
 
   if (!alreadyAdded) {
     await rc.set(lockKey, "1", 3600);
-    console.log(`[ON-DEMAND] Adicionando ${infoHash} ao ${provider}...`);
+    logger.info(`[ON-DEMAND] Adicionando ${infoHash} ao ${provider}...`);
     try {
       if (isST) {
         const payload = { magnet };
@@ -95,7 +102,7 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
         };
         const addRes = await axios.post(`${stUrl}/v0/store/magnets`, payload, { headers, validateStatus: () => true });
         if (addRes.status >= 400) {
-           console.log(`[ON-DEMAND] Falha StremThru Add:`, addRes.data);
+           logger.warn(`[ON-DEMAND] Falha StremThru Add:`, addRes.data);
         } else {
            const stData = addRes.data?.data;
            if (stData && (stData.status === "downloaded" || (stData.files && stData.files.length > 0))) {
@@ -112,9 +119,9 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
       } else if (isTB) {
         const tbResult = await torboxAddTorrent(magnet, config.torboxKey, false, torrentBuffer, { infoHash });
         if (!tbResult) {
-          console.log(`[ON-DEMAND] Falha ao adicionar ao TorBox (pode já estar na fila ou erro de API)`);
+          logger.warn(`[ON-DEMAND] Falha ao adicionar ao TorBox`);
         } else {
-          console.log(`[ON-DEMAND] Adicionado com sucesso ao TorBox`);
+          logger.info(`[ON-DEMAND] Adicionado com sucesso ao TorBox`);
           const isReady = tbResult.download_finished === true || tbResult.download_present === true || tbResult.download_state === "cached";
           if (isReady && tbResult.files?.length > 0) {
             if (requestedFileId) {
@@ -133,13 +140,13 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
       } else if (isRD) {
         const ok = await rdAddTorrent(magnet, config.rdKey, torrentBuffer);
         if (!ok) {
-          console.log(`[ON-DEMAND] Falha ao adicionar ao RD`);
+          logger.warn(`[ON-DEMAND] Falha ao adicionar ao RD`);
           return res.status(500).send(`Falha ao adicionar torrent ao Real-Debrid`);
         }
-        console.log(`[ON-DEMAND] Adicionado com sucesso ao RD`);
+        logger.info(`[ON-DEMAND] Adicionado com sucesso ao RD`);
       }
     } catch (e) {
-      console.log(`[ON-DEMAND] Erro ao adicionar: ${e.message}`);
+      logger.warn(`[ON-DEMAND] Erro ao adicionar: ${e.message}`);
       if (isRD) return res.status(500).send(`Erro: ${e.message}`);
     }
   }
@@ -190,7 +197,7 @@ async function pollWithBackoff(label, checkFn) {
   const deadline = Date.now() + 120000;
   const delays   = [1000, 2000, 3000, 5000];
   let delayIndex = 0;
-  console.log(`[ON-DEMAND] ${label}: aguardando download (até 120s)...`);
+  logger.info(`[ON-DEMAND] ${label}: aguardando download (até 120s)`);
 
   while (Date.now() < deadline) {
     try {
@@ -217,7 +224,7 @@ async function pollStremThru(res, stUrl, stStoreName, stToken, infoHash, request
     const torrent = items.find(t => t.hash?.toLowerCase() === infoHash.toLowerCase());
 
     if (torrent && (torrent.status === "downloaded" || (torrent.files && torrent.files.length > 0))) {
-      console.log(`[ON-DEMAND] StremThru pronto! Gerando link...`);
+      logger.debug(`[ON-DEMAND] StremThru pronto! Gerando link...`);
       const selectedFile = requestedFileId ? torrent.files.find(f => String(f.index) === String(requestedFileId)) : torrent.files[0];
       if (selectedFile?.link) {
         const linkRes = await axios.post(`${stUrl}/v0/store/link/generate`, { link: selectedFile.link }, { headers, validateStatus: () => true });
@@ -246,7 +253,7 @@ async function pollTorbox(res, torboxKey, infoHash, requestedFileId, magnet, sea
                     (torrent?.hash && torrent?.files?.length > 0);
 
     if (isCached && torrent?.files?.length > 0) {
-      console.log(`[ON-DEMAND] TorBox pronto! Resolvendo stream...`);
+      logger.debug(`[ON-DEMAND] TorBox pronto! Resolvendo stream...`);
       if (requestedFileId) {
         const tid = torrent.id || torrent.torrent_id;
         return `https://api.torbox.app/v1/api/torrents/requestdl?token=${torboxKey}&torrent_id=${tid}&file_id=${encodeURIComponent(requestedFileId)}&redirect=true`;
@@ -261,6 +268,7 @@ async function pollTorbox(res, torboxKey, infoHash, requestedFileId, magnet, sea
 }
 
 router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
+  if (!qbitFeatureEnabled()) return res.status(404).send("qBittorrent desabilitado.");
   const prefs = await resolvePrefs(req.params.userConfig);
   const job = await loadQbitJob(req.params.jobToken);
   if (!job?.infoHash) return res.status(404).send("Job expirado ou inválido.");
@@ -282,9 +290,9 @@ router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
         // Caminho preferencial: buffer pré-baixado salvo no job como base64
         try {
           torrentBuffer = Buffer.from(job.torrentB64, "base64");
-          console.log(`[qBit] Buffer .torrent do job: ${torrentBuffer.length} bytes`);
+          logger.debug(`[qBit] Buffer .torrent do job: ${torrentBuffer.length} bytes`);
         } catch (e) {
-          console.log(`[qBit] Falha ao decodificar torrentB64: ${e.message}`);
+          logger.warn(`[qBit] Falha ao decodificar torrentB64: ${e.message}`);
         }
       }
 
@@ -303,13 +311,13 @@ router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
             if (dl.data && Buffer.from(dl.data)[0] === 0x64) {
               const raw = Buffer.from(dl.data);
               try { torrentBuffer = injectTrackers(raw); } catch { torrentBuffer = raw; }
-              console.log(`[qBit] .torrent re-baixado do link: ${torrentBuffer.length} bytes`);
+              logger.debug(`[qBit] .torrent re-baixado do link: ${torrentBuffer.length} bytes`);
             }
           }
         } catch (e) {
           if (!e.message.includes("magnet")) {
             await markTorrentDownloadFailed(job.link);
-            console.log(`[qBit] Falha ao re-baixar .torrent: ${e.message}`);
+            logger.warn(`[qBit] Falha ao re-baixar .torrent: ${e.message}`);
           }
         }
       }
@@ -327,7 +335,7 @@ router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
       if (!playable) {
         // Ainda não tem buffer — responde imediatamente e deixa o player tentar em 5s.
         // O Stremio e a maioria dos players respeitam o Retry-After e tentam novamente.
-        console.log(`[qBit] ${job.infoHash} sem buffer ainda — respondendo 503 para retry`);
+        logger.info(`[qBit] ${job.infoHash} sem buffer ainda — respondendo 503`);
         res.setHeader("Retry-After", "5");
         return res.status(503).send("Aguardando buffer do qBittorrent...");
       }
@@ -336,12 +344,13 @@ router.get("/:userConfig/qbit/:jobToken", async (req, res) => {
     // 5. Arquivo disponível: faz o streaming com suporte a Range requests
     await streamTorrentFile(req, res, job.infoHash, job.fileIdx, job.fileName, qbitCreds);
   } catch (err) {
-    console.log(`[qBit] Falha ao preparar ${job.infoHash}: ${err.message}`);
+    logger.warn(`[qBit] Falha ao preparar ${job.infoHash}: ${err.message}`);
     if (!res.headersSent) res.status(503).send(`qBittorrent: ${err.message}`);
   }
 });
 
 router.get("/qbit/stream/:jobToken", async (req, res) => {
+  if (!qbitFeatureEnabled()) return res.status(404).json({ error: "qBittorrent desabilitado" });
   const job = await loadQbitJob(req.params.jobToken);
   if (!job?.infoHash) return res.status(404).json({ error: "Job expirado ou inválido" });
   const qbitCreds = job.qbit || null;
@@ -350,7 +359,7 @@ router.get("/qbit/stream/:jobToken", async (req, res) => {
   try {
     await streamTorrentFile(req, res, job.infoHash, job.fileIdx, job.fileName, qbitCreds);
   } catch (err) {
-    console.error("[qBit stream]", err.message);
+    logger.error(`[qBit stream] ${err.message}`);
     if (!res.headersSent) res.status(503).json({ error: err.message });
   }
 });

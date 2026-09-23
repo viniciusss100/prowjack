@@ -4,6 +4,7 @@ const https  = require("https");
 const crypto = require("crypto");
 const { enrichMetaPtBr } = require("./metadata");
 const { CACHE_VERSION } = require("./constants");
+const logger = require("./logger");
 
 https.globalAgent.setMaxListeners(50);
 require("events").EventEmitter.defaultMaxListeners = 50;
@@ -112,7 +113,7 @@ async function fetchPrivateIndexers(jUrl, jKey) {
       if (indexers.length) return indexers;
     }
   } catch (err) {
-    console.log(`[RSS] Erro ao buscar indexers: ${err.message}`);
+    logger.warn(`[RSS] Erro ao buscar indexers: ${err.message}`);
   }
   return [];
 }
@@ -148,7 +149,7 @@ function parseRssItems(xml, indexerId, indexerName) {
     // ╔════════════════════════════════════════════════════════════════╗
     // ║ OTIMIZAÇÃO #3: Usar regex compiladas (não recompila)          ║
     // ╚════════════════════════════════════════════════════════════════╝
-    const isAnime  = CATEGORY_REGEX.anime.test(attrs.category || "") || 
+    const isAnime  = CATEGORY_REGEX.anime.test(attrs.category || "") ||
                     CATEGORY_REGEX.animeTag.test(title);
     const isSeries = !isAnime && (
       CATEGORY_REGEX.series.test(title) ||
@@ -195,8 +196,8 @@ async function fetchIndexerRss(jUrl, jKey, indexerId, indexerName, rc) {
       params: { apikey: jKey, t: "search", q: "" },
       timeout: 20000, responseType: "text", validateStatus: () => true,
     });
-    if (res.status === 429) { console.log(`[RSS] ${indexerName || indexerId}: rate limit (429)`); return []; }
-    if (res.status >= 400) { console.log(`[RSS] ${indexerName || indexerId}: HTTP ${res.status}`); return []; }
+    if (res.status === 429) { logger.warn(`[RSS] ${indexerName || indexerId}: rate limit (429)`); return []; }
+    if (res.status >= 400) { logger.warn(`[RSS] ${indexerName || indexerId}: HTTP ${res.status}`); return []; }
     const items = parseRssItems(String(res.data || ""), indexerId, indexerName);
 
     // Resolve background com controle de concorrência
@@ -244,7 +245,7 @@ async function saveToRedis(rc, indexerId, indexerName, items, skipCatalog = fals
     const key = buildRssCacheKey(indexerId, type);
     if (!list.length) continue;
     await rc.set(key, JSON.stringify(list), RSS_CACHE_TTL);
-    console.log(`[RSS] ${indexerName} (${type}): ${list.length} itens salvos`);
+    logger.debug(`[RSS] ${indexerName} (${type}): ${list.length} itens salvos`);
   }
 
   if (!skipCatalog) setImmediate(() => updateCatalog(rc, items, indexerId).catch(() => {}));
@@ -358,7 +359,7 @@ async function updateCatalog(rc, newItems, indexerId = null) {
     const merged = [...resolved, ...existingFiltered].slice(0, 200);
     const CATALOG_KEY = "rss:catalog";
     await rc.set(`${CATALOG_KEY}:${type}`, JSON.stringify(merged), CATALOG_TTL);
-    console.log(`[RSS Catalog] ${type}: +${resolved.length} novos (total ${merged.length})`);
+    logger.info(`[RSS Catalog] ${type}: +${resolved.length} novos (total ${merged.length})`);
   }
 
   // Salva os itens atualizados (agora com ImdbId descoberto) de volta no cache raw
@@ -374,28 +375,28 @@ async function updateCatalog(rc, newItems, indexerId = null) {
 async function pollOnce(jUrl, jKey, rc) {
   const catalogFilter = (process.env.RSS_CATALOG_INDEXERS || "").trim();
   if (!catalogFilter) {
-    console.log("[RSS] RSS_CATALOG_INDEXERS não configurado. Polling RSS desabilitado.");
+    logger.info("[RSS] RSS_CATALOG_INDEXERS não configurado. Polling RSS desabilitado.");
     return;
   }
 
-  console.log("[RSS] Iniciando polling de indexers configurados...");
+  logger.info("[RSS] Iniciando polling de indexers configurados...");
   const indexers = await fetchPrivateIndexers(jUrl, jKey);
   if (!indexers.length) {
-    console.log("[RSS] Nenhum indexer retornado da API.");
+    logger.warn("[RSS] Nenhum indexer retornado da API.");
     return;
   }
-  
+
   const indexersToPoll = indexers.filter(ix => {
     const tokens = catalogFilter.toLowerCase().split(",").map(s => s.trim());
     return tokens.includes(String(ix.id)) || tokens.some(t => ix.name.toLowerCase().includes(t));
   });
 
   if (!indexersToPoll.length) {
-    console.log(`[RSS] Nenhum dos indexers configurados (${catalogFilter}) foi encontrado.`);
+    logger.warn(`[RSS] Nenhum dos indexers configurados (${catalogFilter}) foi encontrado.`);
     return;
   }
 
-  console.log(`[RSS] Polling limitado a: ${indexersToPoll.map(i => i.name).join(", ")}`);
+  logger.info(`[RSS] Polling limitado a: ${indexersToPoll.map(i => i.name).join(", ")}`);
 
   for (const ix of indexersToPoll) {
     const items = await fetchIndexerRss(jUrl, jKey, ix.id, ix.name, rc);
@@ -404,7 +405,7 @@ async function pollOnce(jUrl, jKey, rc) {
     await new Promise(r => setTimeout(r, 3000));
   }
 
-  console.log("[RSS] Polling concluído.");
+  logger.debug("[RSS] Polling concluído.");
 }
 
 function startRssPoller(jUrl, jKey, rc, redisClient) {
@@ -412,9 +413,9 @@ function startRssPoller(jUrl, jKey, rc, redisClient) {
   const runWhenReady = () => {
     if (started) return;
     started = true;
-    pollOnce(jUrl, jKey, rc).catch(err => console.log(`[RSS] Erro: ${err.message}`));
+    pollOnce(jUrl, jKey, rc).catch(err => logger.warn(`[RSS] Erro: ${err.message}`));
     setInterval(() => {
-      pollOnce(jUrl, jKey, rc).catch(err => console.log(`[RSS] Erro: ${err.message}`));
+      pollOnce(jUrl, jKey, rc).catch(err => logger.warn(`[RSS] Erro: ${err.message}`));
     }, POLL_INTERVAL_MS);
   };
 
@@ -430,7 +431,7 @@ function startRssPoller(jUrl, jKey, rc, redisClient) {
     setTimeout(runWhenReady, 5000);
   }
 
-  console.log(`[RSS] Poller agendado (intervalo: ${POLL_INTERVAL_MS / 60000} min)`);
+  logger.info(`[RSS] Poller agendado (intervalo: ${POLL_INTERVAL_MS / 60000} min)`);
 }
 
 const CATALOG_KEY = "rss:catalog";

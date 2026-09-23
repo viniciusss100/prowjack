@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const fs     = require("fs");
 const { normalizePrefs } = require("./prefs");
 const path   = require("path");
+const logger = require("./logger");
 
 // Lidos diretamente do ambiente para que rotas e streams compartilhem a mesma
 // persistência sem depender de cada chamador repassar esses valores.
@@ -72,7 +73,7 @@ function getConfigPgPool(configDbUrl) {
   const opts = buildConfigPgOptions(configDbUrl);
   let hostname = "";
   try { hostname = new URL(opts.connectionString).hostname; } catch {}
-  console.log(`[CFG] Postgres inicializado (host=${hostname || '?'}, ssl=${opts.ssl ? JSON.stringify(opts.ssl) : 'off'})`);
+  logger.info(`[CFG] Postgres inicializado (host=${hostname || '?'}, ssl=${opts.ssl ? JSON.stringify(opts.ssl) : 'off'})`);
   configPgPool = new Pool(opts);
   return configPgPool;
 }
@@ -95,7 +96,7 @@ async function ensureConfigDb(configDbUrl, configDbTable) {
       try { await migrateConfigFileToDb(pool, configDbTable); } catch {}
     }).catch((err) => {
       configPgInit = null;
-      console.error(`[CFG] Falha ao inicializar a tabela Postgres '${configDbTable}':`, err?.message || err);
+      logger.error(`[CFG] Falha ao inicializar a tabela Postgres '${configDbTable}':`, err?.message || err);
       throw err;
     });
   }
@@ -150,7 +151,7 @@ async function migrateConfigFileToDb(pool, configDbTable) {
       }
     } catch {}
   }
-  if (migrated) console.log(`[CFG] Migradas ${migrated} config(s) do arquivo para o Postgres.`);
+  if (migrated) logger.info(`[CFG] Migradas ${migrated} config(s) do arquivo para o Postgres.`);
 }
 
 // ─── File-based store ────────────────────────────────────────────────────────
@@ -175,7 +176,7 @@ function cfgFileSave(store) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(store), "utf8");
   } catch (err) {
-    console.error(`[CFG] Falha ao salvar configs: ${err.message}`);
+    logger.error(`[CFG] Falha ao salvar configs: ${err.message}`);
   }
 }
 
@@ -194,12 +195,12 @@ async function saveStoredConfig(prefs, configDbUrl, configDbTable) {
     try {
       await cfgDbSave(id, prefs, configDbUrl, configDbTable);
     } catch (err) {
-      console.error(`[CFG] Falha ao salvar no Postgres (env: POSTGRES_URL/CONFIG_DATABASE_URL): ${err?.message || err}`);
+      logger.error(`[CFG] Falha ao salvar no Postgres (env: POSTGRES_URL/CONFIG_DATABASE_URL): ${err?.message || err}`);
       throw err;
     }
     return `cfg_${id}`;
   }
-  console.warn(`[CFG] Nenhuma env de banco definida (POSTGRES_URL/CONFIG_DATABASE_URL/DATABASE_URL). Salvando em arquivo: ${CONFIG_FILE}`);
+  logger.warn(`[CFG] Nenhuma env de banco definida. Salvando em arquivo: ${CONFIG_FILE}`);
   const store = cfgStore();
   store[id] = JSON.stringify(prefs);
   cfgFileSave(store);
@@ -241,12 +242,12 @@ async function resolvePrefs(encoded) {
   try {
     stored = encoded ? await loadStoredUserCfg(encoded) : null;
   } catch (err) {
-    console.error(`[CFG] Erro ao carregar config '${encoded}': ${err?.message || err}. Usando defaults.`);
+    logger.error(`[CFG] Erro ao carregar config, usando defaults.`);
   }
   const decodedDirect = encoded ? decodeUserCfg(encoded) : null;
   const decoded = stored || decodedDirect || {};
   if (encoded && !stored && !decodedDirect) {
-    console.warn(`[CFG] Config '${encoded}' não encontrada (Postgres/arquivo). Addon usando configuração padrão — reinstale o addon ou reaplique a config para persistir.`);
+    logger.warn(`[CFG] Config não encontrada. Usando configuração padrão.`);
   }
   return normalizePrefs(decoded);
 }

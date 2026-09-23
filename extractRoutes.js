@@ -23,7 +23,7 @@ for (const node of ast.body) {
       if (['get', 'post', 'use'].includes(method)) {
         if (node.expression.arguments.length > 0 && node.expression.arguments[0].type === 'Literal') {
           const path = node.expression.arguments[0].value;
-          
+
           let target = null;
           if (path.startsWith('/api/')) target = 'api';
           else if (path === '/manifest.json' || path === '/:userConfig/manifest.json' || path === '/internal/:userConfig/manifest.json') target = 'manifest';

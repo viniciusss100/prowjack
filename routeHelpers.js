@@ -3,6 +3,7 @@ const axios = require("axios");
 const { ENV, PUBLIC_TRACKERS } = require("./constants");
 const { stripSourceBadges } = require("./scoring");
 const { isConfigured: isQbitConfigured } = require("./providers/qbittorrent");
+const logger = require("./logger");
 
 const rateLimitStore = new Map();
 const RATE_LIMIT_WINDOW = 60000;
@@ -38,7 +39,13 @@ function getPublicBase(req) {
   if (ENV.addonPublicUrl) return ENV.addonPublicUrl.replace(/\/+$/, "");
   const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
   const host     = req.headers["x-forwarded-host"]  || req.get("host");
-  return `${protocol}://${host}`;
+  // Sanitiza o host para evitar injeção de CR/LF ou caracteres inválidos
+  // (host header injection em URLs geradas pelo addon).
+  const cleanHost = String(host || "")
+    .replace(/[\r\n\t]/g, "")
+    .replace(/[^a-z0-9.\-:\[\]]/gi, "")
+    .slice(0, 255);
+  return `${protocol}://${cleanHost}`;
 }
 
 // Garante que a URL usada como upstream interno no StremThru tenha protocolo
@@ -74,6 +81,9 @@ function buildStremThruProxyManifestUrl(req, prefs, userConfig) {
 }
 
 function isQbitEnabledForPrefs(prefs, creds = null) {
+  // Feature flag de ambiente: qBittorrent desabilitado via ENV não pode ser
+  // reativado por configuração do usuário (proteção em nível de servidor).
+  if (!ENV.enableQbit) return false;
   if (prefs?.enableP2P === false) return false;
   if (!["always", "private"].includes(String(prefs?.qbitMode || ""))) return false;
   return isQbitConfigured(creds);
@@ -198,7 +208,7 @@ async function fetchScrapStreams(manifestUrl, type, id, options = {}) {
       const reason = err.code === "ECONNABORTED"
         ? `timeout após ${options.timeout || 8000}ms`
         : err.message;
-      console.log(`[WARN] ${options.label}: ${reason}`);
+      logger.warn(`[${options.label}]: ${reason}`);
     }
     return [];
   }

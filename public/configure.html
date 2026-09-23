@@ -661,7 +661,31 @@ async function loadEnv() {
     label('redis', env.redisOk ? 'Redis' : 'Redis (offline)');
     // Store server type for later use
     state.serverType = env.serverType || 'unknown';
+    // Feature flags: funcionalidades experimentais ficam ocultas na instância
+    // pública a menos que habilitadas via variáveis de ambiente.
+    applyFeatureFlags(env);
   } catch {}
+}
+
+function applyFeatureFlags(env) {
+  // qBittorrent: oculta da UI quando ENABLE_QBITTORRENT=false no servidor.
+  if (env.enableQbit === false) {
+    const p2pRow = document.getElementById('enableP2P')?.closest('label');
+    if (p2pRow) p2pRow.style.display = 'none';
+    const qbitHint = document.querySelector('#sec-debrid .info[style*="margin-left"]');
+    if (qbitHint && qbitHint.textContent.includes('QBIT')) qbitHint.style.display = 'none';
+    const qbitPanel = document.getElementById('qbitModeConfig');
+    if (qbitPanel) qbitPanel.style.display = 'none';
+    document.getElementById('enableP2P').checked = false;
+  }
+  // Catálogo RSS: oculta da UI quando ENABLE_RSS_CATALOG=false no servidor.
+  if (env.enableRssCatalog === false) {
+    const rssBtn = document.getElementById('enableCatalogBtn');
+    if (rssBtn) {
+      rssBtn.classList.remove('on');
+      rssBtn.closest('.tg-row').style.display = 'none';
+    }
+  }
 }
 
 // ── Indexers ──────────────────────────────────────────────────────

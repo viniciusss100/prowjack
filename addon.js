@@ -10,6 +10,7 @@ const { isConfigured: isQbitConfigured } = require("./providers/qbittorrent");
 const { startRssPoller } = require("./rssPoller");
 const { ENV } = require("./constants");
 const { checkRateLimit } = require("./routeHelpers");
+const logger = require("./logger");
 
 const app = express();
 
@@ -52,10 +53,23 @@ app.use("/", require("./routes/qbit"));
 app.use("/", require("./routes/stream"));
 
 app.listen(ENV.port, "0.0.0.0", () => {
-  console.log(`===== Application Startup at ${new Date().toISOString().replace('T', ' ').slice(0, 19)} =====`);
-  console.log(`ProwJack v3.3.1 -> http://localhost:${ENV.port}/configure`);
-  console.log(`   Jackett : ${ENV.jackettUrl}`);
-  console.log(`   Redis   : ${ENV.redisUrl}`);
-  console.log(`   qBittorrent: ${isQbitConfigured() ? "ativo" : "desativado"}`);
-  startRssPoller(ENV.jackettUrl, ENV.apiKey, rc, redis);
+  // Nunca logar credenciais: REDIS_URL pode conter user:pass.
+  const safeRedis = (() => {
+    try {
+      const u = new URL(ENV.redisUrl);
+      if (u.username) u.username = "***";
+      if (u.password) u.password = "***";
+      return u.toString();
+    } catch { return ENV.redisUrl ? "(configurado)" : "(vazio)"; }
+  })();
+  logger.info(`===== Application Startup at ${new Date().toISOString().replace('T', ' ').slice(0, 19)} =====`);
+  logger.info(`ProwJack v3.3.2 -> http://localhost:${ENV.port}/configure (log level: ${logger.level})`);
+  logger.info(`   Jackett : ${ENV.jackettUrl || "(vazio)"}   Redis: ${safeRedis}`);
+  logger.info(`   qBittorrent: ${ENV.enableQbit && isQbitConfigured() ? "ativo" : `desativado${isQbitConfigured() ? " (flag desabilitada)" : ""}`}`);
+  logger.info(`   Feature flags: ENABLE_QBITTORRENT=${ENV.enableQbit} ENABLE_RSS_CATALOG=${ENV.enableRssCatalog}`);
+  if (ENV.enableRssCatalog) {
+    startRssPoller(ENV.jackettUrl, ENV.apiKey, rc, redis);
+  } else {
+    logger.info("[RSS] ENABLE_RSS_CATALOG=false — poller desabilitado.");
+  }
 });
