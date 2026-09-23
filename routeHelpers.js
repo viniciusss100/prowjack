@@ -111,11 +111,16 @@ function sendConfigurePage(res) {
   res.sendFile(path.join(__dirname, "public", "configure.html"));
 }
 
-// Extrai o indexador real informado pelo addon externo (marcador "⚙️ Nome"),
-// ex.: BrasilRD marca "🔗 13 ⚙️ Comando Torrents" → "Comando Torrents".
+// Extrai o indexador real informado pelo addon externo. Os addons de scrap
+// marcam a fonte de formas distintas:
+//   - BrasilRD (render/vercel): "👤 26 🔍 Comando Torrents" → "Comando Torrents"
+//   - Outros addons: "⚙️ Comando Torrents" ou "🔗 13 ⚙️ Comando Torrents"
+// O marcador 🔍/⚙️ identifica o INDEXADOR de origem (não o nome do addon que
+// apenas agrega a fonte). Sem marca, retorna "" e o chamador usa o 📡 do addon.
 function extractScrapIndexer(...texts) {
-  const m = texts.filter(Boolean).join("\n").match(/⚙️\s*([^\n]+)/);
-  return m ? m[1].trim().slice(0, 80) : "";
+  const m = texts.filter(Boolean).join("\n").match(/(?:🔍|⚙️)\s*([^\n]+)/);
+  if (!m) return "";
+  return m[1].trim().slice(0, 80);
 }
 
 // Descrição normalizada para streams de addons externos (modo StremThru e
@@ -130,7 +135,7 @@ function scrapExternalDescription(stream, source) {
   const releaseLines = filename
     ? []
     : text.split("\n").map(l => l.trim()).filter(l =>
-        l && !/^(?:🔗|🌱|👤|👥)\s*\d/i.test(l) && !l.startsWith("⚙️") && !l.startsWith("🌐"));
+        l && !/^(?:🔗|🌱|👤|👥)\s*\d/i.test(l) && !/^(?:🔍|⚙️)/.test(l) && !l.startsWith("🌐"));
   return [
     ...releaseLines.slice(0, 2),
     seedMatch ? `🌱 ${seedMatch[1]}` : "",

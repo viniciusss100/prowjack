@@ -45,8 +45,37 @@ test("renameIndexer: normaliza e remove badges", () => {
 });
 
 test("scrapers externos: indexador marcado pelo addon é extraído (⚙️ Bludv/Comando)", () => {
-  // Simula um addon externo marcando a fonte real com ⚙️ (ex.: BrasilRD).
+  // Simula um addon externo marcando a fonte real com ⚙️ (ex.: BrasilRD antigo).
   assert.equal(extractScrapIndexer("Meca.Area.2024.1080p.mkv\n⚙️ Comando Torrents\n🌐 pt-BR"), "Comando Torrents");
   assert.equal(extractScrapIndexer("Filme X [BluRay]\n⚙️ Bludv"), "Bludv");
   assert.equal(extractScrapIndexer("Filme Y"), "");
+});
+
+test("scrapers externos: extrai indexador real no formato BrasilRD (🔍)", () => {
+  // BrasilRD (render/vercel) marca o indexador com 🔍 dentro do título.
+  const brasilrdTitle =
+    "Duna 2021 1080p WEB-DL FULL HD DUAL 5.1\n👤 26 🔍 Comando Torrents\n💿 1080p 🌐 PT-BR 🇧🇷 🇺🇸 📅 08/09/2026";
+  assert.equal(extractScrapIndexer(brasilrdTitle), "Comando Torrents");
+  // Outros indexadores marcados com 🔍.
+  assert.equal(extractScrapIndexer("O.Poço.2025\n👤 12 🔍 Bludv\n🌐 pt-BR"), "Bludv");
+  // Sem marcador, retorna vazio (cai para o 📡 do addon).
+  assert.equal(extractScrapIndexer("nome-do-addon\n1080p SemMarcador"), "");
+  // 🔗 (seeds) não deve ser confundido com indexador.
+  assert.equal(extractScrapIndexer("🔗 13 ⚙️ Comando Torrents"), "Comando Torrents");
+});
+
+test("scrapExternalDescription: mantém indexador e fonte sem duplicar linha", () => {
+  const { scrapExternalDescription } = routeHelpers;
+  const stream = {
+    name: "brasilrd-render\n1080p",
+    title: "Duna 2021 1080p\n👤 26 🔍 Comando Torrents\n🌐 PT-BR 🇧🇷",
+    description: "",
+    behaviorHints: { filename: "Duna 2021 1080p.mkv" },
+  };
+  const desc = scrapExternalDescription(stream, "brasilrd-render");
+  assert.ok(desc.includes("⚙️ Comando Torrents"), desc);
+  assert.ok(desc.includes("📡 brasilrd-render"), desc);
+  assert.ok(desc.includes("🌱 26"), desc);
+  // O título não deve aparecer em linha duplicada com o marcador 🔍 cru.
+  assert.ok(!desc.includes("🔍"), desc);
 });
