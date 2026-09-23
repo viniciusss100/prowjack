@@ -57,7 +57,8 @@ const PUBLIC_TRACKERS = ["1337x", "thepiratebay", "eztv", "yts", "torrentgalaxy"
 // Releases de baixa qualidade (cam/ts/telesync/etc). Usado quando o usuário ativa
 // "Skip CAM/TS" (prefs.skipBadReleases, padrão ligado). Aplica-se a indexadores E
 // a streams que vêm de addons externos (SCRAP_MANIFEST_URLS).
-const BAD_RE = /\b(cam(hd)?|camrip|hdcam|telesync|telsync|telecine|tsrip|tcrip|hdts|hdrip-ts|dvdscr|screener|workprint)\b/i;
+// "cinecalidad" é uma fonte/release famosa por CAM/TS em espanhol.
+const BAD_RE = /\b(cam(hd)?|camrip|hdcam|telesync|telsync|telecine|tsrip|tcrip|hdts|hdrip-ts|dvdscr|screener|workprint|cinecalidad)\b/i;
 const BAD_EXT_RE = /\.(iso|r\d{2}|zip|rar|7z|tar|gz|zipx|arj|txt|nfo|jpg|png|pdf|exe|bat|cmd|scr|msi|ps1|vbs|js|jar|com|pif|reg|dll|sys|lnk|url)$/i;
 
 const TORRENT_FAILURE_TTL = 3600000;

@@ -22,6 +22,8 @@ test("BAD_RE: detecta releases de baixa qualidade (cam/ts/telesync/etc)", () => 
     "Filme DVDSCR 720p",
     "Screener x264",
     "Workprint 1080p",
+    "Filme 2024 1080p CAM CineCalidad",
+    "Filme 2024 HDTS CineCalidad x264",
   ];
   for (const t of bad) {
     assert.ok(BAD_RE.test(t), `deveria bloquear: ${t}`);
