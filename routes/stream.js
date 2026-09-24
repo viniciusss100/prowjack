@@ -73,6 +73,41 @@ function streamTrackerList(r, resolved) {
   return [];
 }
 
+// Extensão de arquivos de vídeo reproduzíveis (para seleção no StremThru).
+const ST_VIDEO_RE = /\.(mkv|mp4|avi|ts|m2ts|mov|wmv|webm)$/i;
+// Extensões claramente NÃO-vídeo que costumam vir como primeiro arquivo do
+// torrent (.url, .png, .nfo, .txt, etc.) e quebravam a reprodução via ST.
+const ST_NON_VIDEO_RE = /\.(url|lnk|png|jpe?g|gif|bmp|nfo|txt|md|torrent|zip|rar|7z|iso)$/i;
+
+// Seleciona o melhor arquivo a partir da lista de arquivos devolvida pelo
+// StremThru. Filmes: maior arquivo de vídeo (ignora .url/.png/.nfo/etc).
+// Séries/animes: episódio correspondente (via pickEpisodeFile). O StremThru
+// devolve os arquivos na ordem do torrent e "0" pode ser um arquivo não-vídeo,
+// o que quebrava a reprodução no modo ST (filename .url/.png).
+function stPickStreamFile(stFiles, parsed, episode) {
+  if (!Array.isArray(stFiles) || !stFiles.length) return null;
+  const normalized = stFiles.map((f, i) => ({
+    idx: (f.index != null ? Number(f.index) : i),
+    name: String(f.name || f.filename || ""),
+    size: Number(f.size || f.length || 0) || 0,
+    raw: f,
+  }));
+  // Séries/anime: tenta casar o episódio pelos nomes dos arquivos
+  if (parsed?.season != null || parsed?.isAnime) {
+    const ep = parsed.episode ?? episode;
+    const matched = pickEpisodeFile(normalized, parsed.season ?? 1, ep, parsed.isAnime || false);
+    if (matched) {
+      const raw = normalized.find(f => f.idx === matched.idx);
+      return raw || matched;
+    }
+    // sem match de episódio: segue para o maior vídeo abaixo
+  }
+  const videos = normalized.filter(f => ST_VIDEO_RE.test(f.name));
+  const pool = videos.length ? videos : normalized;
+  const best = pool.reduce((a, b) => ((b.size || 0) > (a.size || 0) ? b : a), pool[0]);
+  return best;
+}
+
 function wrapStreamDisplayName(rawName, s, addonName) {
   const nameStr = String(rawName || "");
   const tag = (nameStr.match(/\[([^\]\n]{1,8})\]/) || [])[1] || "";
@@ -370,6 +405,14 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
              const isPrivate = String(s.description || "").includes("Tracker Privado");
              const isUncached = String(s.name || "").includes("⬇️");
              return !(isPrivate && isUncached);
+          })
+          .filter(s => {
+            // FIX (ST): streams de addons externos cujo filename veio não-vídeo do
+            // StremThru (.url/.png/.nfo) não reproduzem. Descarta apenas quando o
+            // campo filename deixa explícito que não há arquivo de vídeo.
+            const filename = s.behaviorHints?.filename || s._filename || "";
+            if (filename && ST_NON_VIDEO_RE.test(filename)) return false;
+            return true;
           })
           .map(s => {
           const rawName = String(s.name || "");
@@ -1304,15 +1347,26 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
             async function stResolveLink(torrentId, stFiles) {
               if (!torrentId || !stFiles?.length) return null;
-              const pickIdx = matchedFile?.idx ?? 0;
-              const file = stFiles[pickIdx] || stFiles[0];
+              // FIX (ST): seleciona o melhor arquivo (maior vídeo em filmes;
+              // episódio em séries/anime) em vez de stFiles[0], que pode ser
+              // .url/.png/.nfo — quebrava a reprodução no modo StremThru.
+              const picked = stPickStreamFile(stFiles, parsed, episode);
+              if (!picked) return null;
+              const pickName = String(picked.name || "");
+              if (pickName && ST_NON_VIDEO_RE.test(pickName) && !ST_VIDEO_RE.test(pickName)) {
+                logger.debug(`[STREMTHRU] Arquivo selecionado não é vídeo (${pickName}) — sem link ST`);
+                return null;
+              }
+              const pickIdx = picked.idx;
+              const file = stFiles.find(f => (f.index != null ? Number(f.index) : stFiles.indexOf(f)) === pickIdx) || picked.raw || stFiles[pickIdx] || stFiles[0];
               if (!file) return null;
               if (file.link) return { link: file.link, name: file.name || file.filename, size: file.size };
               try {
                 const lr = await axios.get(`${_baseUrl}/v0/store/torz/${torrentId}`, {
                   headers: _stHeaders, timeout: 10000, validateStatus: s => s < 400,
                 });
-                const freshFile = (lr.data?.data?.files || [])[pickIdx];
+                const files = (lr.data?.data?.files || []);
+                const freshFile = files.find(f => (f.index != null ? Number(f.index) : files.indexOf(f)) === pickIdx) || files[pickIdx] || files[0];
                 if (freshFile?.link) return { link: freshFile.link, name: freshFile.name, size: freshFile.size };
               } catch {}
               return null;
