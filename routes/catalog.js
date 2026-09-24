@@ -96,8 +96,8 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
   }
 
   try {
-    // ── PASSO 1: Cinemeta primeiro (lista completa de episódios com thumbnails/títulos) ──
-    // Lógica inspirada no builder.js do addon TorBox: buscar metadados ricos do Cinemeta
+    // PASSO 1: Cinemeta primeiro (lista completa de episódios com thumbnails/títulos)
+// Lógica inspirada no builder.js do addon TorBox: buscar metadados ricos do Cinemeta
     // ANTES de verificar o RSS, e só depois filtrar pelos episódios disponíveis no cache.
     // Isso evita o "nenhuma informação disponível" causado por ImdbIds ainda não resolvidos.
     const metaCacheKey = `rssmeta:${rssMeta.metaId}`;
@@ -122,8 +122,8 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
     }
     baseMeta = await enrichMetaPtBr(baseMeta, rssMeta.metaId, "series");
 
-    // ── PASSO 2: Construir set de episódios disponíveis a partir do cache RSS ──
-    // Mesmo padrão do builder.js: availableEps determina quais episódios mostrar.
+    // PASSO 2: Construir set de episódios disponíveis a partir do cache RSS
+// Mesmo padrão do builder.js: availableEps determina quais episódios mostrar.
     const rssItems = await loadRssItemsForType(prefs, rssMeta.catalogType);
     const matchedRssItems = rssItems.filter(item =>
       normalizeImdbId(item.ImdbId) === normalizeImdbId(rssMeta.metaId)
@@ -150,8 +150,8 @@ router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
 
     logger.debug(`[Meta] ${rssMeta.metaId}: ${matchedRssItems.length} itens RSS`);
 
-    // ── PASSO 3: Filtrar episódios do Cinemeta e remalear IDs para rssitem: ──
-    const cinemetaVideos = baseMeta.videos || [];
+    // PASSO 3: Filtrar episódios do Cinemeta e remalear IDs para rssitem:
+const cinemetaVideos = baseMeta.videos || [];
     let videos;
 
     if (availableEps.size === 0) {

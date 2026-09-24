@@ -1337,8 +1337,8 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             return items;
           }
 
-          // ── Modo StremThru direto (sem debrid nativo) ──────────────────
-          if (!isDebridMode && prefs.stConfig && resolved.infoHash) {
+          // Modo StremThru direto (sem debrid nativo)
+if (!isDebridMode && prefs.stConfig && resolved.infoHash) {
             const _addonName = prefs.addonName || "ProwJack";
             const _stStore = prefs.stConfig.stores[0];
             if (!_stStore) return null;
@@ -1418,8 +1418,8 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
             return null;
           }
 
-          // ── Modo P2P (sem debrid) ──────────────────────────────────────
-          const shouldOfferQbit = shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCreds);
+          // Modo P2P (sem debrid)
+const shouldOfferQbit = shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCreds);
 
           if (shouldOfferQbit && (localPlayable || r.Link || magnet)) {
             const qbitStream = await buildQbitStream();

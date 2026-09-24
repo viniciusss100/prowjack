@@ -114,8 +114,7 @@ async function qbitApi(endpoint, options = {}, creds = null) {
   return res;
 }
 
-// ─────────────────────────────────────────────────────────
-// FIX PRINCIPAL: addTorrentBuffer agora usa FormData + Blob NATIVOS do Node.js 18+
+// // FIX PRINCIPAL: addTorrentBuffer agora usa FormData + Blob NATIVOS do Node.js 18+
 //
 // Problema original: o código usava `require('form-data')` (pacote npm) que cria um
 // stream Readable do Node.js — incompatível com o fetch() nativo (undici) que espera
@@ -125,7 +124,7 @@ async function qbitApi(endpoint, options = {}, creds = null) {
 //
 // Solução: FormData e Blob globais (Node.js 18+) são 100% compatíveis com fetch nativo.
 // O Content-Type multipart com boundary é definido automaticamente pelo fetch.
-// ─────────────────────────────────────────────────────────
+//
 async function addTorrentBuffer(infoHash, torrentBuffer, creds = null) {
   if (!Buffer.isBuffer(torrentBuffer) || !torrentBuffer.length) {
     throw new Error("Buffer .torrent inválido");

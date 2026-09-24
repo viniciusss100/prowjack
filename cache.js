@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const Redis = require("ioredis");
 const logger = require("./logger");
 
-// ─── Configuração via ENV ────────────────────────────────────────────────────
+// Configuração via ENV
 // Importado depois que ENV é definido no addon.js; aqui lemos direto do process.env
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 

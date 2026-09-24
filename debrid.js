@@ -33,9 +33,7 @@ function logRdAddFailure(stage, res) {
   logger.warn(`[RD] ${stage} falhou: HTTP ${status} ${data.slice(0, 500)}`);
 }
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #1: Deduplicação mais eficiente com Set único          ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #1: Deduplicação mais eficiente com Set único
 async function rdFindExistingTorrent(hash, key) {
   try {
     const hashLower = hash.toLowerCase();
@@ -149,9 +147,7 @@ async function rdListDownloadedHashes(hashes, headersAuth) {
   return resultMap;
 }
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #2: Batch check cache com deduplicação eficiente       ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #2: Batch check cache com deduplicação eficiente
 async function rdBatchCheckCache(hashes, key, bufferMap = {}, privateHashes = new Set()) {
   if (!hashes || !hashes.length) return {};
 
@@ -343,9 +339,7 @@ async function torboxRequestDL(torrentId, fileId, key, source = "torrent") {
   }
 }
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #3: TorBox batch check com case handling único          ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #3: TorBox batch check com case handling único
 async function torboxBatchCheckCache(hashes, key, privateHashes = new Set()) {
   if (!hashes || !hashes.length) return {};
 

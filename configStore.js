@@ -19,7 +19,7 @@ function getConfigDbTable(value) {
   return table;
 }
 
-// ─── Postgres ────────────────────────────────────────────────────────────────
+// Postgres
 let configPgPool = null;
 let configPgInit = null;
 
@@ -154,7 +154,7 @@ async function migrateConfigFileToDb(pool, configDbTable) {
   if (migrated) logger.info(`[CFG] Migradas ${migrated} config(s) do arquivo para o Postgres.`);
 }
 
-// ─── File-based store ────────────────────────────────────────────────────────
+// File-based store
 const CONFIG_FILE = (() => {
   let dir = process.env.CONFIG_DATA_DIR || "";
   // Se CONFIG_DATA_DIR for uma URL (ex.: alguém colou a string do Postgres por
@@ -186,7 +186,7 @@ function cfgStore() {
   return _cfgStore;
 }
 
-// ─── saveStoredConfig / loadStoredUserCfg ────────────────────────────────────
+// saveStoredConfig / loadStoredUserCfg
 async function saveStoredConfig(prefs, configDbUrl, configDbTable) {
   configDbUrl = getConfigDbUrl(configDbUrl);
   configDbTable = getConfigDbTable(configDbTable);

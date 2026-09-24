@@ -13,9 +13,7 @@ const POLL_INTERVAL_MS = 45 * 60 * 1000;
 const RSS_CACHE_TTL    = 24 * 3600;
 const CATALOG_TTL      = 24 * 3600;
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #1: Cache compilado para regex (não recompila)         ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #1: Cache compilado para regex (não recompila)
 const CATEGORY_REGEX = {
   anime: /\b(anime|animes)\b/i,
   animeTag: /\[SubsPlease\]|\[Erai-raws\]|\[HorribleSubs\]/i,
@@ -118,9 +116,7 @@ async function fetchPrivateIndexers(jUrl, jKey) {
   return [];
 }
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #2: Decodificação com cache inline                     ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #2: Decodificação com cache inline
 function decodeXml(str = "") {
   return str
     .replace(CDATA_REGEX, "$1")
@@ -146,9 +142,7 @@ function parseRssItems(xml, indexerId, indexerName) {
     const title = getTag("title") || "";
     if (!title || (!link && !magnetUri)) return null;
 
-    // ╔════════════════════════════════════════════════════════════════╗
-    // ║ OTIMIZAÇÃO #3: Usar regex compiladas (não recompila)          ║
-    // ╚════════════════════════════════════════════════════════════════╝
+    // OTIMIZAÇÃO #3: Regex compiladas
     const isAnime  = CATEGORY_REGEX.anime.test(attrs.category || "") ||
                     CATEGORY_REGEX.animeTag.test(title);
     const isSeries = !isAnime && (
@@ -296,9 +290,7 @@ async function updateCatalog(rc, newItems, indexerId = null) {
     const resolved = [];
     let idx = 0;
 
-    // ╔════════════════════════════════════════════════════════════════╗
-    // ║ OTIMIZAÇÃO #4: Worker pool com limit de concorrência          ║
-    // ╚════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #4: Worker pool com limit de concorrência
     const CONC_WORKERS = 5;
     async function resolveWorker() {
       while (idx < items.length) {

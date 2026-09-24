@@ -606,8 +606,8 @@ function filterBadMatches(results, parsed, plan) {
     const targetSeason = parsed.season;
     const targetEpisode = parsed.episode;
 
-    // ── Séries / Animes ──
-    if (parsed.type === "series" && targetSeason != null && targetEpisode != null) {
+    // Séries / Animes
+if (parsed.type === "series" && targetSeason != null && targetEpisode != null) {
       if (!parsed.isAnime) {
         if (!titleMatchesEpisode(title, targetSeason, targetEpisode)) {
           logger.debug(`[Filtro] Removido episódio diferente (T${targetSeason}E${targetEpisode}): ${title}`);
@@ -632,8 +632,8 @@ function filterBadMatches(results, parsed, plan) {
       }
     }
 
-    // ── Filmes ──
-    if (parsed.type === "movie") {
+    // Filmes
+if (parsed.type === "movie") {
       if (aliases.length && normTitle(aliases[0]).length >= 4) {
         const overlap = normalizedTokenOverlap(title, aliases);
         const score = titleMatchScore(title, aliases);

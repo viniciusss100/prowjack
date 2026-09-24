@@ -1,9 +1,7 @@
-const logger = require("./logger");
 "use strict";
+const logger = require("./logger");
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ Tabelas de classificação de qualidade, resolução, codec, etc.     ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// Tabelas de classificação de qualidade, resolução, codec, etc.
 const RESOLUTION = [
   { re: /\b(4k|2160p)\b/i, label: "2160p", emoji: "🎞️ 4K",  score: 4   },
   { re: /\b1440p\b/i,      label: "1440p", emoji: "🎞️ 2K",  score: 3.5 },
@@ -57,22 +55,22 @@ const PT_BR_KEYWORDS = [
 const PT_BR_DUAL_GROUPS = `100real 3lton 7sprite7 aconduta adamantium alfahd amantedoharpia andrehsa anonimo anonymous07 asm asy azx bad bdc big bioma bnd brhd brremux brt bs byjames byoutou c c0ral c76 cbr chronod cory ct cypher cza dalmaciojr dks dm domlara dsb eck eduvaldxd elm4g0 emmid eri estagiario extr3muss fabr fantasma223 ff fido filehd fly foxx franceira franzopl freddiegellar freedomhd frncr fusion g4ris gjumandi gmn gong got gris gueira inss izards jk jkr joekerr jus kallango lapumia lcd levaculik lmb ltda lucano22 lukas madruga master mdg mico micoleaodublado mlh n3g4n netope nex nogroup nous3r ntz olympus oscarniemeyer pd pf pia piratadigital plushd plusHD potatin princeputt20 professorx rarbr rk riper rlee rmb ro455 sacerdoti sh4down shaka shelby sherlock sigla siz3d spaghettimancer tars thecs thr tijuco titans tontom toonshub tossato treecher troidex tupac unknown96 upd varyg vnlls wastake witchhunter wtv wyrm xar xiquexique xprince00 yatogam1 zmg znm`.split(" ");
 const PT_BR_KEYWORD_RE = new RegExp(`(?:^|[^a-z0-9])(?:${[...PT_BR_KEYWORDS, ...PT_BR_DUAL_GROUPS.map(g => `dual-${g}`)].map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?:$|[^a-z0-9])`, "i");
 const PT_BR_LANGUAGE_RE = /(?:dublado|dubbed.*pt|pt[-_. ]?br|ptbr|portugu[eê]s|portuguese|brazilian|porbr|porb|ita[-_.]?por|tr[-_.]?pt|multi[-_. ]?(?:audio|mwr)|dual[-_. ]?audio|🇧🇷|🇵🇹)/i;
+// Áudio duplo latino/espanhol NÃO é português: "DUAL-LAT", "DUAL AUDIO LATINO",
+// "DUAL.5.1.LATINO", "DUAL ESP", "DUAL AUDIO ESPAÑOL/ESPAÑOL" etc.
+const PT_BR_EXCLUDE_RE = /\bdual[-_. ]?(?:audio)?[-_. ]?(?:lat(?:ino)?|espa[nñ]?h?ol|spanish|spa|esp)\b/i;
 
 const LANG = [
   { re: /(dublado|dubbed.*pt|pt[-_. ]?br|ptbr|portugu[eê]s|portuguese|brazilian|porbr|porb|ita[-_.]?por|tr[-_.]?pt|🇧🇷|🇵🇹)/i, code: "pt-br", emoji: "🇧🇷", label: "PT-BR" },
   { re: /\b(english|eng)\b/i,                                      code: "en",    emoji: "🇺🇸", label: "EN"    },
-  { re: /(espa[nñ]ol|spanish|\besp\b)/i,                           code: "es",    emoji: "🇪🇸", label: "ES"    },
+  // "lat"/"latino" = espanhol latino (não é português)
+  { re: /(espa[nñ]ol|espan?hol|spanish|\besp\b|lat(?:ino)?|\blat\b)/i, code: "es", emoji: "🇪🇸", label: "ES" },
   { re: /(fran[cç]ais|french|\bfre\b)/i,                           code: "fr",    emoji: "🇫🇷", label: "FR"    },
 ];
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #1: Cache compilado para TITLE_CLEANUP_REGEX           ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #1: Cache compilado para TITLE_CLEANUP_REGEX
 const TITLE_CLEANUP_REGEX = /\b(2160p|1440p|1080p|720p|576p|480p|4k|remux|blu[-.]?ray|web[-.]?dl|webrip|hdrip|dvdrip|hdtv|brrip|x26[45]|h\.?26[45]|hevc|av1|avc|dual|multi|audio|dublado|legendado|pt[-_. ]?br|eng|english|spanish|espa[nñ]ol|french|fran[cç]ais|aac|ac3|ddp?|eac3|atmos|truehd|dts(?:[-.]?hd|[-.]?x)?|10bit|8bit|proper|repack|extended|uncut|complete|completa|batch)\b/gi;
 
-// ╔════════════════════════════════════════════════════════════════════╗
-// ║ OTIMIZAÇÃO #2: Cache Set para STOPWORDS                           ║
-// ╚════════════════════════════════════════════════════════════════════╝
+// OTIMIZAÇÃO #2: Cache Set para STOPWORDS
 const STOPWORDS = new Set(["the", "movie", "film", "one", "two", "and", "for", "with", "from", "into", "part"]);
 
 const first    = (map, t) => {
@@ -91,7 +89,14 @@ function getLangs(title) {
 }
 
 function hasPtBrKeyword(title) {
-  return PT_BR_LANGUAGE_RE.test(String(title || "")) || PT_BR_KEYWORD_RE.test(String(title || ""));
+  const raw = String(title || "");
+  // Exclusão explícita: "dual-lat"/"dual latino"/"dual esp" é espanhol latino,
+  // não português — mesmo quando o título contém "dual audio" genérico.
+  // Marcadores portugueses inequívocos (dublado/pt-br/português) prevalecem.
+  if (PT_BR_EXCLUDE_RE.test(raw) && !/\b(dublado|pt[-_. ]?br|ptbr|portugu[eê]s|portuguese|brazilian)\b/i.test(raw)) {
+    return false;
+  }
+  return PT_BR_LANGUAGE_RE.test(raw) || PT_BR_KEYWORD_RE.test(raw);
 }
 
 function hasPtBrResult(result) {
@@ -415,7 +420,7 @@ function dedupeWithCachePriority(withHashes, isDebridMode) {
   return result;
 }
 
-// ─── Formatação de stream ─────────────────────────────────────────────────────
+// Formatação de stream
 function extractGroup(title) {
   const m = title.match(/[-.]([A-Z0-9]{2,12})(?:\[.+?\])?$/i);
   return m ? m[1].toUpperCase() : null;

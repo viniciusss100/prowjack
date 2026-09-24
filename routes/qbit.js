@@ -192,7 +192,7 @@ router.get("/:userConfig/debrid-add/:provider/:infoHash", async (req, res) => {
   return res.status(500).send("Debrid Provider não suportado neste fallback");
 });
 
-// ── Polling helpers (backoff: 1s → 2s → 3s → 5s, até 120s) ──────────────────
+// Polling helpers (backoff: 1s → 2s → 3s → 5s, até 120s)
 async function pollWithBackoff(label, checkFn) {
   const deadline = Date.now() + 120000;
   const delays   = [1000, 2000, 3000, 5000];

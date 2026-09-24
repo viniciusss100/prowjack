@@ -1,6 +1,6 @@
 "use strict";
 
-// ─── Helpers de sanitização ───────────────────────────────────────────────────
+// Helpers de sanitização
 function clampNumber(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -31,7 +31,7 @@ function safeServiceUrl(value) {
   catch { return ""; }
 }
 
-// ─── Prefs padrão e normalização ─────────────────────────────────────────────
+// Prefs padrão e normalização
 function defaultPrefs() {
   return {
     indexers:        ["all"],
