@@ -15,7 +15,8 @@ const logger = require("./logger");
 const app = express();
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+// Cache dos assets estáticos (logo.svg etc.) para reduzir invocações no edge.
+app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h", immutable: true }));
 
 app.use((req, res, next) => {
   const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;

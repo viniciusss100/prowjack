@@ -9,6 +9,24 @@ const rateLimitStore = new Map();
 const RATE_LIMIT_WINDOW = 60000;
 const RATE_LIMIT_THRESHOLD = 100;
 
+// Define Cache-Control com s-maxage (cache do CDN — Vercel) para reduzir
+// invocações: respostas públicas reaproveitáveis são servidas pelo edge sem
+// executar a função serverless.
+function setCacheControl(res, { maxAge = 0, sMaxAge = 0, isPrivate = false } = {}) {
+  const scope = isPrivate ? "private" : "public";
+  const parts = [scope];
+  if (maxAge > 0) parts.push(`max-age=${maxAge}`);
+  if (isPrivate) {
+    // private: CDN não cacheia; s-maxage não se aplica a conteúdo privado
+    res.set("Cache-Control", parts.join(", "));
+  } else if (sMaxAge > 0) {
+    parts.push(`s-maxage=${sMaxAge}`);
+    res.set("Cache-Control", parts.join(", "));
+  } else {
+    res.set("Cache-Control", parts.join(", "));
+  }
+}
+
 function checkRateLimit(ip) {
   const now = Date.now();
 
@@ -247,5 +265,6 @@ module.exports = {
   extractScrapIndexer,
   scrapExternalDescription,
   isPrivateTrackerCandidate,
-  checkRateLimit
+  checkRateLimit,
+  setCacheControl,
 };

@@ -14,7 +14,8 @@ const {
   fetchScrapStreams,
   extractScrapIndexer,
   scrapExternalDescription,
-  isPrivateTrackerCandidate
+  isPrivateTrackerCandidate,
+  setCacheControl,
 } = require("../routeHelpers");
 const {
   RESOLUTION, QUALITY,
@@ -1734,10 +1735,26 @@ const shouldOfferQbit = shouldOfferQbitForResult(prefs, isPrivateTracker, qbitCr
     logger.debug(`[Resumo] brutos=${results.length} candidatos=${candidates.length} comHash=${withHashes.length} dedupe=${dedupedWithHashes.length} final=${finalStreams.length}`);
     logger.debug(`[PERF] total=${Date.now() - _t0}ms`);
     releaseLock(finalStreams);
+
+    // FIX (Vercel/edge): reduz invocações definindo Cache-Control com s-maxage.
+    //   • streams P2P (infoHash/sources, sem URL privada) → cacheável no CDN (público)
+    //   • streams com URL debrid (RD/TB/ST) → NÃO cachear publicamente (token/URL
+    //     específicos) → private
+    //   • vazio → cache curto p/ evitar repetir busca em indisponibilidade/troca de
+    //     título, mas não segurar erro por muito tempo
+    const hasPrivateUrl = finalStreams.some(s => typeof s.url === "string" || (s.externalUrl && !s.infoHash && !s.sources?.length));
+    if (finalStreams.length === 0) {
+      setCacheControl(res, { maxAge: 30, sMaxAge: 30 });
+    } else if (hasPrivateUrl) {
+      setCacheControl(res, { maxAge: 60, isPrivate: true });
+    } else {
+      setCacheControl(res, { maxAge: 300, sMaxAge: 900 });
+    }
     res.json({ streams: finalStreams });
   } catch (err) {
     logger.error(`Erro no processamento: ${err.message}`);
     releaseLock([]);
+    setCacheControl(res, { maxAge: 15, sMaxAge: 15 });
     res.json({ streams: [] });
   }
 });

@@ -1,11 +1,12 @@
 const express = require("express");
 const { resolvePrefs } = require("../configStore");
-const { getPublicBase } = require("../routeHelpers");
+const { getPublicBase, setCacheControl } = require("../routeHelpers");
 const { ENV } = require("../constants");
 
 const router = express.Router();
 
 router.get("/manifest.json", (req, res) => {
+  setCacheControl(res, { maxAge: 60, sMaxAge: 600 });
   res.json({
     id: "org.prowjack.pro", version: "3.3.2", name: "ProwJack",
     logo: `${getPublicBase(req)}/logo.svg`,
@@ -23,6 +24,7 @@ router.get("/internal/:userConfig/manifest.json", async (req, res) => {
     const prefs = { ...rawPrefs, debrid: false, stConfig: null, enableP2P: true };
     const name = prefs.addonName || "ProwJack";
     const types = [...new Set((prefs.categories || ["movie", "series"]).map(c => c === "movies" ? "movie" : c === "anime" ? "series" : c))];
+    setCacheControl(res, { maxAge: 60, sMaxAge: 600 });
     res.json({
       id: `org.prowjack.internal.${req.params.userConfig}`,
       version: "3.3.2",
@@ -41,6 +43,7 @@ router.get("/internal/:userConfig/manifest.json", async (req, res) => {
 
 router.get("/:userConfig/manifest.json", async (req, res) => {
   const prefs  = await resolvePrefs(req.params.userConfig);
+  setCacheControl(res, { maxAge: 60, sMaxAge: 600 });
 
   const types  = [...new Set((prefs.categories || ["movie","series"]).map(c => c==="movies"?"movie":c==="anime"?"series":c))];
   const name   = prefs.addonName || "ProwJack";

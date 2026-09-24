@@ -7,6 +7,7 @@ const { loadRssItemsForType, rssCatalogMetaId, parseRssMetaId, extractSeriesFeed
 const { normalizeImdbId } = require("../scoring");
 const { enrichMetaPtBr } = require("../metadata");
 const { CATALOG_KEY } = require("../rssPoller");
+const { setCacheControl } = require("../routeHelpers");
 const logger = require("../logger");
 
 const router = express.Router();
@@ -14,6 +15,7 @@ const router = express.Router();
 router.get("/:userConfig/catalog/:type/:id.json", async (req, res) => {
   const { id } = req.params;
   const prefs = await resolvePrefs(req.params.userConfig);
+  setCacheControl(res, { maxAge: 300, sMaxAge: 900 });
   const catalogTypeMap = {
     prowjack_rss_movie:  "movie",
     prowjack_rss_series: "series",
@@ -58,6 +60,7 @@ router.get("/:userConfig/catalog/:type/:id.json", async (req, res) => {
 router.get("/:userConfig/meta/:type/:id.json", async (req, res) => {
   const { type, id } = req.params;
   const prefs = await resolvePrefs(req.params.userConfig);
+  setCacheControl(res, { maxAge: 300, sMaxAge: 900 });
 
   // rssmovie: — busca meta no Cinemeta pelo tt... extraído
   if (id.startsWith("rssmovie:")) {
