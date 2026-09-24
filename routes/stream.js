@@ -42,6 +42,37 @@ const { EXTRA_TRACKERS, extractTrackers, injectTrackers } = require("../torrentE
 // externos): "ProwJack\n⚡️ 🔵 FHD [TB]" — mesmo formato do debrid nativo.
 // A fonte/indexador do addon externo fica na descrição (⚙️/📡).
 const ST_RES_LABELS = { "2160p": "🟣 4K", "1440p": "🟡 2K", "1080p": "🔵 FHD", "720p": "🟢 HD", "576p": "⚫ SD", "480p": "⚫ SD" };
+
+// Extrai a lista de trackers que um stream P2P deve usar. Para streams vindos de
+// addons externos, prioriza as `sources`/magnet ORIGINAIS (trackers de origem),
+// senão o torrent buffer/magnet do resultado, e por último os trackers fixos.
+// Isso evita "arquivo inválido" no Stremio em torrents de trackers privados/niche,
+// cujos pares não existem nos trackers públicos genéricos.
+function streamTrackerList(r, resolved) {
+  if (r._scrapSource && Array.isArray(r._scrapSources) && r._scrapSources.length) {
+    const out = [];
+    for (const src of r._scrapSources) {
+      const t = String(src || "");
+      if (t.startsWith("tracker:")) out.push(t.slice("tracker:".length));
+      else if (/^(udp|http|https|wss):\/\//i.test(t)) out.push(t);
+    }
+    if (out.length) return out;
+  }
+  const magnet = (r.MagnetUri && String(r.MagnetUri).startsWith("magnet:")) ? r.MagnetUri : (r._scrapStream?.magnet || null);
+  if (!resolved?.buffer && magnet) {
+    const out = [];
+    for (const m of (magnet.matchAll(/[&?]tr=([^&]+)/g) || [])) {
+      try { out.push(decodeURIComponent(m[1])); } catch {}
+    }
+    if (out.length) return out;
+  }
+  if (resolved?.buffer) {
+    const out = extractTrackers(resolved.buffer);
+    if (out.length) return out;
+  }
+  return [];
+}
+
 function wrapStreamDisplayName(rawName, s, addonName) {
   const nameStr = String(rawName || "");
   const tag = (nameStr.match(/\[([^\]\n]{1,8})\]/) || [])[1] || "";
@@ -665,11 +696,19 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
       const titleText = s._title || [s.title, s.name, s.description, s.behaviorHints?.filename].filter(Boolean).join("\n") || "Scrap Stream";
       const hash = s.infoHash || (s.url && s.url.match(/btih:([a-f0-9]{40})/i)?.[1]) || null;
       const streamUrl = s.url || s.externalUrl || null;
+      // Preserva o magnet ORIGINAL do addon externo (com os trackers de origem).
+      // Recriar como "magnet:?xt=urn:btih:<hash>" sem os &tr= fazia o Stremio não
+      // encontrar peers em torrents de trackers privados/niche (ex.: Comando).
+      const originalMagnet = (s.magnet && s.magnet.startsWith("magnet:"))
+        ? s.magnet
+        : (typeof s.url === "string" && s.url.startsWith("magnet:") ? s.url : null);
 
       return {
         Title: titleText,
         InfoHash: hash,
-        MagnetUri: hash ? `magnet:?xt=urn:btih:${hash}` : null,
+        MagnetUri: originalMagnet || (hash ? `magnet:?xt=urn:btih:${hash}` : null),
+        // sources originais do addon (trackers de origem) preservados para o P2P
+        _scrapSources: Array.isArray(s.sources) && s.sources.length ? s.sources : null,
         Link: streamUrl || 'scrap-stream',
         Size: s._sizeBytes || s.behaviorHints?.videoSize || 0,
         Seeders: s._seeders || 0,
@@ -1333,7 +1372,8 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
             if (isPrivateTracker && !r.MagnetUri) {
               if (!resolved.infoHash) return qbitStream;
-              const sources = EXTRA_TRACKERS.map(t => `tracker:${t}`).concat(`dht:${resolved.infoHash}`);
+              const trackers = streamTrackerList(r, resolved);
+              const sources = (trackers.length ? trackers : EXTRA_TRACKERS).map(t => `tracker:${t}`).concat(`dht:${resolved.infoHash}`);
               const p2pPrivate = {
                 name, description: [description, filenameLine].filter(Boolean).join("\n"),
                 infoHash: resolved.infoHash, sources,
@@ -1344,14 +1384,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
               return [qbitStream, p2pPrivate];
             }
 
-            let _qbitTrackers = [];
-            if (resolved.buffer) {
-              _qbitTrackers = extractTrackers(resolved.buffer);
-            } else if (r.MagnetUri) {
-              for (const m of (r.MagnetUri.matchAll(/[&?]tr=([^&]+)/g) || [])) {
-                try { _qbitTrackers.push(decodeURIComponent(m[1])); } catch {}
-              }
-            }
+            const _qbitTrackers = streamTrackerList(r, resolved);
             const _qbitAllTrackers = _qbitTrackers.length ? _qbitTrackers : EXTRA_TRACKERS;
             const sources = _qbitAllTrackers.map(t => `tracker:${t}`).concat(`dht:${resolved.infoHash}`);
             if (!resolved.infoHash) return qbitStream;
@@ -1382,14 +1415,7 @@ router.get("/:userConfig/stream/:type/:id.json", async (req, res) => {
 
             // Formato exato do Torrentio (referência oficial):
             // sources = trackers.map(t => `tracker:${t}`).concat(`dht:${infoHash}`)
-            let trackerList = [];
-            if (resolved.buffer) {
-              trackerList = extractTrackers(resolved.buffer);
-            } else if (r.MagnetUri) {
-              for (const m of (r.MagnetUri.matchAll(/[&?]tr=([^&]+)/g) || [])) {
-                try { trackerList.push(decodeURIComponent(m[1])); } catch {}
-              }
-            }
+            const trackerList = streamTrackerList(r, resolved);
             const allTrackers = trackerList.length ? trackerList : EXTRA_TRACKERS;
             const sources = allTrackers.map(t => `tracker:${t}`).concat(`dht:${resolved.infoHash}`);
 
